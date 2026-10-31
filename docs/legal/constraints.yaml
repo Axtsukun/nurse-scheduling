@@ -1,0 +1,37 @@
+# 看護師勤務の制約一覧（調査日 2026-10-30、実装には未反映）
+# class: A 法令 / B 診療報酬施設基準 / C 医療法 / D 努力義務・ガイドライン
+# confidence: high / medium / low（low は原典確認まで実装の根拠にしない）
+# model: 現行モデルの制約名（nurse_csp.py の REGISTRY）。null は未実装
+# status: implemented / partial / none / n-a
+- {id: LAW-HOURS-WEEK,    class: A, hard: true,  confidence: high,   model: null,        status: none,        note: "週40h・日8h（32条）"}
+- {id: LAW-HOURS-VAR1M,   class: A, hard: true,  confidence: high,   model: null,        status: none,        note: "1か月変形: 総労働時間 <= 40h*日数/7（32条の2）"}
+- {id: LAW-BREAK,         class: A, hard: true,  confidence: high,   model: null,        status: n-a,         note: "6h超45分・8h超60分（34条）。勤務定義で扱う"}
+- {id: LAW-HOLIDAY,       class: A, hard: true,  confidence: high,   model: holiday,     status: implemented, note: "週1休または4週4休（35条）。有休は休日に数えない。暦日休日の厳密解釈は holiday_strict_calendar（解釈は要確認）"}
+- {id: LAW-OVERTIME,      class: A, hard: true,  confidence: high,   model: null,        status: n-a,         note: "36条。勤務を所定内に収めており事実上発生しない"}
+- {id: LAW-PREGNANT,      class: A, hard: true,  confidence: high,   model: null,        status: none,        note: "66条。該当者の夜勤を domain から除外"}
+- {id: LAW-NURSING-TIME,  class: A, hard: true,  confidence: high,   model: null,        status: none,        note: "67条。育児時間"}
+- {id: LAW-MINOR-NIGHT,   class: A, hard: true,  confidence: low,    model: null,        status: n-a,         note: "61条。看護師では通常該当しない"}
+- {id: LAW-CHILDCARE-OT,  class: A, hard: true,  confidence: medium, model: null,        status: none,        note: "育介法16条の8。3歳未満の所定外免除"}
+- {id: LAW-CHILDCARE-LIMIT, class: A, hard: true, confidence: medium, model: null,       status: none,        note: "育介法17条。月24h・年150h"}
+- {id: LAW-CHILDCARE-NIGHT, class: A, hard: true, confidence: medium, model: null,       status: none,        note: "育介法19条。深夜業の制限。例外要件は未確認"}
+- {id: LAW-PAID-LEAVE,    class: A, hard: true,  confidence: low,    model: fixed,       status: partial,     note: "39条。年5日。有休を固定割当で入れる（年5日の確保そのものは未検査）"}
+- {id: LAW-NIGHT-CHECKUP, class: A, hard: false, confidence: medium, model: null,        status: n-a,         note: "安衛則45条。運用上の義務"}
+- {id: REIMB-NIGHT-2,     class: B, hard: true,  confidence: medium, model: cover,       status: partial,     note: "夜勤は看護師1人含む2人以上。cover で間接的"}
+- {id: REIMB-72H,         class: B, hard: true,  confidence: high,   model: 72h,         status: implemented, note: "月平均夜勤72h以下。病棟平均"}
+- {id: REIMB-NIGHT-WINDOW, class: B, hard: true, confidence: medium, model: 72h,         status: implemented, note: "22時〜翌5時を含む16時間。night_window"}
+- {id: REIMB-72H-EXCLUDE, class: B, hard: true,  confidence: medium, model: 72h,         status: implemented, note: "夜勤専従・16h未満（他は8h未満、短時間正職員12h）を除外"}
+- {id: REIMB-72H-PENALTY, class: B, hard: false, confidence: medium, model: null,        status: n-a,         note: "超過時は夜勤時間特別入院基本料（減算）"}
+- {id: REIMB-RATIO,       class: B, hard: true,  confidence: medium, model: null,        status: none,        note: "7対1。看護師比率7割以上（月平均）"}
+- {id: REIMB-PARTTIME,    class: B, hard: true,  confidence: medium, model: null,        status: none,        note: "兼務・非常勤は常勤換算"}
+- {id: REIMB-NIGHT-ONLY-144, class: B, hard: true, confidence: low,  model: null,        status: none,        note: "夜勤専従者の月144h。未確認"}
+- {id: MED-STAFF-STD,     class: C, hard: false, confidence: medium, model: null,        status: n-a,         note: "医療法施行規則19条の標準。標欠は改善指導"}
+- {id: MED-STAFF-FORMULA, class: C, hard: false, confidence: low,    model: null,        status: n-a,         note: "具体式は未確認"}
+- {id: GL-INTERVAL-LAW,   class: D, hard: false, confidence: high,   model: rest,        status: implemented, note: "労働時間等設定改善法の努力義務"}
+- {id: GL-REST-11H,       class: D, hard: true,  confidence: high,   model: rest,        status: implemented, note: "勤務間隔11h"}
+- {id: GL-SPAN-13H,       class: D, hard: false, confidence: medium, model: null,        status: n-a,         note: "拘束13h以内。勤務定義で満たす"}
+- {id: GL-NIGHT-COUNT,    class: D, hard: false, confidence: high,   model: night_band,  status: partial,     note: "3交代月8回以内・2交代月4回または64h"}
+- {id: GL-CONSEC-NIGHT,   class: D, hard: true,  confidence: medium, model: null,        status: none,        note: "連続夜勤2回まで（診療報酬採用の可能性）"}
+- {id: GL-CONSEC-WORK,    class: D, hard: true,  confidence: medium, model: consec,      status: implemented, note: "連続勤務5日以内"}
+- {id: GL-REST-AFTER-NIGHT, class: D, hard: false, confidence: medium, model: null,      status: none,        note: "夜勤後24h/48h"}
+- {id: GL-WEEKEND,        class: D, hard: false, confidence: medium, model: weekend,     status: partial,     note: "月1回は前後に夜勤のない土日の休み"}
+- {id: GL-ROTATION,       class: D, hard: true,  confidence: medium, model: null,        status: none,        note: "正循環（診療報酬採用の可能性）"}

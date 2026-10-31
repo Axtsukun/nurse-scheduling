@@ -1,0 +1,6 @@
+cpmpy
+ortools
+numpy
+pytest
+pyyaml
+exact
