@@ -5,6 +5,7 @@ from .kernel import ModelKernel
 from .registry import constraint, Item, Aux
 from .message import Nurse, DaySpan, Param
 from .preprocess import holiday_windows, overnight_shifts
+from .codes import InputError
 
 
 class LawConstraints(ModelKernel):
@@ -17,7 +18,7 @@ class LawConstraints(ModelKernel):
         windows = holiday_windows(self.I)
         for n in self.N:
             if self.x(n, self.t(0), self.OFF) is None:
-                raise ValueError(f"看護師 {n}: 休がドメインにないため休日を与えられない")
+                raise InputError(f"看護師 {n}: 休がドメインにないため休日を与えられない")
             flags: dict[int, object] = {}                      # 時点 t → 休日の指標（窓をまたいで使い回す）
             for t0, t1, k in windows:
                 for t in range(t0, t1):
