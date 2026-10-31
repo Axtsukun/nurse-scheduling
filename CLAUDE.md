@@ -80,3 +80,24 @@ python nurse_csp.py                    # 合成インスタンスで計測
 ## 法令・基準の調査（docs/legal/）
 制約の根拠（労基法・診療報酬の施設基準・看護協会ガイドライン）は `docs/legal/` に整理済み（調査のみ、実装には未反映）。
 制約を追加・変更する前に `docs/legal/constraints.yaml` を引き、確度が low の項目は原典を確認するまで実装の根拠にしない。
+
+## ブランチ運用
+開発は **develop を基本**にする（決定事項。変更する場合はユーザーに確認）。
+
+| ブランチ | 役割 | 直接コミット |
+|---|---|---|
+| `main` | リリース用。develop から反映する | しない |
+| `develop` | 開発の基準。作業ブランチの起点と統合先 | しない |
+| 作業ブランチ | 1つの機能・修正の作業。develop から切る | する |
+
+- **作業の流れ**: `develop` を最新にして作業ブランチを切る → コミット → push → PR で `develop` にマージ → 作業ブランチを削除。
+  ```bash
+  git switch develop && git pull --ff-only origin develop
+  git switch -c feature/holiday-4w4d          # 作業ブランチ
+  git push -u origin feature/holiday-4w4d
+  ```
+- **ブランチ名**: `種別/内容`。種別は `feature`（機能）/ `fix`（修正）/ `docs`（ドキュメント）/ `refactor` / `test` / `chore` のいずれか。内容は英小文字とハイフン。例: `feature/holiday-4w4d`、`fix/night-band-bound`、`docs/branch-rules`。
+- **マージ方法**: develop へは **Squash merge**（1ブランチ = 1コミット）。コミットメッセージは squash 後の1件を整える。
+- **PR の向き先**: `develop`。GitHub のデフォルトブランチは `main` のままなので、PR 作成時に base を `develop` にする（既定にしたい場合は GitHub の Settings → Branches で変更）。
+- **Claude の作業**: 作業ブランチを切って進め、`main` と `develop` には直接 push しない。PR は依頼があったときだけ作る。
+- **未決定**: リリース（develop → main）のマージ方法・タグ付けの運用。
