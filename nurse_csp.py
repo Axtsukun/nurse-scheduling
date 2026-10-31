@@ -7,7 +7,7 @@
 使い方:  python nurse_csp.py [--lin 0|1|2] [--time-limit 秒]     （評価は evaluate.py）
 """
 from nurse import *            # noqa: F401,F403  公開 API を再エクスポート
-from nurse import (Eps, synthetic, precheck, solve, diagnose, roster)
+from nurse import (Eps, synthetic, precheck, solve, diagnose, roster, MUS_TIME_LIMIT)
 
 
 def main() -> None:
@@ -15,6 +15,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="合成インスタンス1問を求解する（評価は evaluate.py）")
     ap.add_argument("--lin", type=int, default=1, help="linearization_level（0/1/2）")
     ap.add_argument("--time-limit", type=float, default=30)
+    ap.add_argument("--mus-time-limit", type=float, default=MUS_TIME_LIMIT, help="解けないとき、矛盾の原因を絞る MUS 1回あたりの秒数")
     args = ap.parse_args()
     I, eps = synthetic(), Eps()
     issues = precheck(I, eps)
@@ -27,7 +28,7 @@ def main() -> None:
     if res.ok:
         print(*roster(res.model)[:6], sep="\n")
     else:
-        print(diagnose(I, eps, time_limit=args.time_limit).explain())
+        print(diagnose(I, eps, time_limit=args.time_limit, mus_time_limit=args.mus_time_limit).explain())
 
 
 if __name__ == "__main__":

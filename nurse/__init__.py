@@ -24,7 +24,7 @@ from .registry import (ConstraintSpec, Item, Aux, Named, REGISTRY, SCOPES, MANDA
                        selected_constraints, toggleable)
 from .model import NurseModel
 from .solver import SOLVE_SOLVER, SolveResult, solve, roster
-from .diagnosis import MUS_SOLVER, Diagnosis, FEASIBLE, TIMEOUT, CONFLICT, diagnose, explain
+from .diagnosis import MUS_SOLVER, MUS_TIME_LIMIT, Diagnosis, FEASIBLE, TIMEOUT, CONFLICT, diagnose, explain
 from .synthetic import SIZES, hm, synthetic, synthetic_for, with_requests
 
 __all__ = [
@@ -35,6 +35,6 @@ __all__ = [
     "symmetry_classes", "precheck", "Renderer", "Nurse", "Day", "DaySpan", "Span", "Cat", "Shift", "Clock", "Param",
     "CAT_NAMES", "WEEKDAYS", "ConstraintSpec", "Item", "Aux", "Named", "REGISTRY", "SCOPES", "MANDATORY", "TOGGLEABLE",
     "constraint", "selected_constraints", "toggleable", "NurseModel", "SOLVE_SOLVER", "SolveResult", "solve", "roster",
-    "MUS_SOLVER", "Diagnosis", "FEASIBLE", "TIMEOUT", "CONFLICT", "diagnose", "explain",
+    "MUS_SOLVER", "MUS_TIME_LIMIT", "Diagnosis", "FEASIBLE", "TIMEOUT", "CONFLICT", "diagnose", "explain",
     "SIZES", "hm", "synthetic", "synthetic_for", "with_requests",
 ]

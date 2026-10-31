@@ -33,6 +33,13 @@ def _inst_fixed_week_holiday():
     return dc.replace(I, fixed=fx, rules=dc.replace(I.rules, off=frozenset({"consec"})))
 
 
+def _inst_72h_extreme():
+    """72時間ルールを 20 時間以下に締める。この制約を外さない限り、他のどの制約を外しても実行不能のままなので、
+    MUS の絞り込みが終わらない（時間制限の挙動を見るための条件。ソルバーの比較には使わない）"""
+    I = m.synthetic()
+    return dc.replace(I, rules=dc.replace(I.rules, domain=dc.replace(I.rules.domain, limit_units=40)))
+
+
 def _is_sat(hard, soft):
     return cp.Model(hard + soft).solve("ortools")
 
@@ -115,3 +122,32 @@ def test_missing_mus_solver_fails_loudly_instead_of_switching():
     """MUS ソルバーが使えないとき、黙って別のソルバーに替えず、導入方法つきのエラーにする"""
     with pytest.raises(RuntimeError, match="pip install exact"):
         m.diagnose(_inst_offcount(), m.Eps(), time_limit=60, mus_solver="no_such_solver")
+
+
+def test_mus_that_finishes_in_time_is_minimal():
+    d = m.diagnose(_inst_offcount(), m.Eps(), time_limit=60)
+    assert d.minimal and "最小でない" not in d.explain()
+
+
+def test_mus_time_limit_returns_the_precandidate_core_when_the_mus_does_not_finish():
+    """mus が時間内に終わらないときは、事前候補（仮定つきの求解で得たコア）を返す。時間内に戻り、矛盾する集合である"""
+    import time
+    I = _inst_72h_extreme()
+    t0 = time.perf_counter()
+    d = m.diagnose(I, m.Eps(), time_limit=60, mus_time_limit=3)
+    assert time.perf_counter() - t0 < 40                                   # 上限なしなら戻らない条件
+    assert d.status == m.CONFLICT and not d.minimal and d.items
+    assert "最小でない可能性" in d.explain()
+    # 返った制約（ID で引き直す）だけを soft として残しても実行不能（矛盾する集合になっている）
+    flat = [x for items in m.NurseModel(I, m.Eps()).build_named().values() for x in items]
+    chosen = {x.id for x in d.items}
+    hard = [x.expr for x in flat if x.hard or m.REGISTRY[x.group].scope in m.MANDATORY]
+    soft = [x.expr for x in flat if x.id in chosen and not x.hard]
+    assert len(soft) == len(d.soft_items) and not _is_sat(hard, soft)
+
+
+def test_mus_time_limit_too_short_to_find_any_core_reports_unidentified_cause():
+    """事前候補も時間内に取れなければ、矛盾は確定しているが原因は特定できない（items が空）"""
+    d = m.diagnose(_inst_72h_extreme(), m.Eps(), time_limit=60, mus_time_limit=0.001)
+    assert d.status == m.CONFLICT and not d.items and not d.minimal
+    assert "特定できませんでした" in d.explain()
