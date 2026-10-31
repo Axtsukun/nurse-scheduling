@@ -94,7 +94,7 @@ def test_plain_expression_and_item_and_aux_are_normalized():
 
 def test_line_format_is_id_then_class_then_message():
     named = m.NurseModel(m.synthetic(start_date=START), m.Eps()).build_named()
-    assert named["cover"][0].line == "cover-0001  [人数制約下限] 11/02 00:00 - 11/02 08:30 勤務者数=3"
+    assert named["cover"][0].line == "cover-0001  [人数制約下限] 11/02 00:00 - 11/02 00:30 勤務者数=3"
 
 
 def test_messages_of_every_group_with_start_date():
@@ -103,7 +103,7 @@ def test_messages_of_every_group_with_start_date():
     first = lambda g: next(x for x in named[g] if not x.hard).line
     assert first("holiday") == "holiday-0001  [休日数下限] N00 11/02 - 11/08 休日数=1"
     assert first("offcount") == "offcount-0001  [公休数一致] N00 公休数=9"
-    assert first("cover") == "cover-0001  [人数制約下限] 11/02 00:00 - 11/02 08:30 勤務者数=3"
+    assert first("cover") == "cover-0001  [人数制約下限] 11/02 00:00 - 11/02 00:30 勤務者数=3"
     assert first("skill") == "skill-0001  [リーダー数下限] 11/02 準夜 リーダー数=1"
     assert named["72h"][-1].line == "72h-0249  [夜勤時間平均上限] 病棟 月平均夜勤時間=72h"
     assert first("rest") == "rest-0001  [勤務間隔下限] N00 11/01 - 11/02 勤務間隔=11h 前日終業>=14:30 翌日始業<01:30"
@@ -125,12 +125,15 @@ def test_messages_of_remaining_groups():
     assert first("fixed").endswith(" 勤務=休") and first("fixed").startswith("N00 ")
 
 
-def test_cover_message_uses_the_demand_interval_and_ends_at_next_day_midnight():
-    """人数制約のメッセージは需要区間（人数を指定する単位）で表す。17:00〜24:00 は翌日の 00:00 で終わる"""
+def test_cover_message_shows_the_base_interval_and_ends_at_next_day_midnight():
+    """人数制約のメッセージは、実際に効いている基本区間（人数を数える小区間）と勤務者数だけで表す。
+    需要区間は出さない。17:30〜24:00 は翌日の 00:00 で終わる"""
     named = m.NurseModel(m.synthetic(start_date=START), m.Eps()).build_named()
-    spans = {x.message.rsplit(" 勤務者数", 1)[0] for x in named["cover"] if x.message.startswith("11/02")}
-    assert spans == {"11/02 00:00 - 11/02 08:30", "11/02 08:30 - 11/02 17:00", "11/02 17:00 - 11/03 00:00"}
-    assert len(named["cover"]) > 3 * 30                                          # 制約は基本区間ごとで、メッセージは同じになる（ID で区別）
+    day0 = [x.message for x in named["cover"] if x.message.startswith("11/02")]
+    assert "11/02 12:30 - 11/02 13:00 勤務者数=10" in day0
+    assert "11/02 17:30 - 11/03 00:00 勤務者数=3" in day0
+    assert not any(s.startswith("11/02 08:30 - 11/02 17:00") for s in day0)     # 需要区間そのものは出ない
+    assert len(day0) == len(set(day0))                                            # 基本区間ごとなので文面も重ならない
 
 
 def test_rest_messages_differ_per_threshold():
@@ -141,7 +144,7 @@ def test_rest_messages_differ_per_threshold():
 
 def test_messages_without_start_date_fall_back_to_day_names():
     named = m.NurseModel(m.synthetic(), m.Eps()).build_named()
-    assert named["cover"][0].line == "cover-0001  [人数制約下限] 1日目(月) 00:00 - 1日目(月) 08:30 勤務者数=3"
+    assert named["cover"][0].line == "cover-0001  [人数制約下限] 1日目(月) 00:00 - 1日目(月) 00:30 勤務者数=3"
     assert next(x for x in named["consec"]).message == "N00 前月末5日前 - 1日目(月) 連続勤務日数=5"
 
 

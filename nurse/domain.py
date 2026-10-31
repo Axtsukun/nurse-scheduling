@@ -25,14 +25,8 @@ class DomainConstraints(ModelKernel):
             for C, r, a, b in cover_spans(self.I, d):
                 terms = [v for n in self.N for off, s in C
                          if (v := self.x(n, self.t(d) + off, s)) is not None]
-                da, db = self._demand_interval(d, a, b)
-                out.append(Item(cp.sum(terms) >= r, (Span(d * DAY + da, d * DAY + db),), (Param("勤務者数", r),)))
+                out.append(Item(cp.sum(terms) >= r, (Span(d * DAY + a, d * DAY + b),), (Param("勤務者数", r),)))
         return out
-
-    def _demand_interval(self, d: int, a: int, b: int) -> tuple[int, int]:
-        """基本区間 [a,b) が属する需要区間 [da,db)（人数を指定する単位）。メッセージは需要区間で表す。
-        需要区間をまたぐ（連続しない統合区間の）ときは、[a,b) そのもの"""
-        return next(((da, db) for da, db, _ in self.I.demand[d] if da <= a and b <= db), (a, b))
 
     @constraint("skill", "L4", scope="domain", title="リーダー数下限")
     def c_skill(self):
