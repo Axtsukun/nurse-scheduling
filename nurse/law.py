@@ -2,15 +2,14 @@
 from __future__ import annotations
 import cpmpy as cp
 from .kernel import ModelKernel
-from .registry import constraint, Labeled, Aux
-from .naming import nurse_name, time_name
-from .instance import HOLIDAY_WEEKLY
+from .registry import constraint, Item, Aux
+from .message import Nurse, DaySpan, Param
 from .preprocess import holiday_windows, overnight_shifts
 
 
 class LawConstraints(ModelKernel):
 
-    @constraint("holiday", "L2", scope="law", source=("LAW-HOLIDAY",), title="休日の付与（労基法35条）")
+    @constraint("holiday", "L2", scope="law", source=("LAW-HOLIDAY",), title="休日数下限")
     def c_holiday(self):
         """労基法35条: 各窓 [t0,t1) に休日が k 日以上（窓は holiday_windows）。
         休日 = 「休」の日（有休は労働日なので数えない）。休日の指標は _holiday_flag を参照。"""
@@ -24,10 +23,8 @@ class LawConstraints(ModelKernel):
                 for t in range(t0, t1):
                     if t not in flags:
                         flags[t] = self._holiday_flag(n, t, out)
-                span = "毎週1回以上" if self.I.rules.law.holiday_rule == HOLIDAY_WEEKLY else "4週間に4日以上"
-                out.append(Labeled(cp.sum([flags[t] for t in range(t0, t1)]) >= k,
-                                   f"{nurse_name(n)}: {time_name(self.I, t0)}〜{time_name(self.I, t1 - 1)}に"
-                                   f"休日が{k}日以上（{span}の休日。労基法35条）"))
+                out.append(Item(cp.sum([flags[t] for t in range(t0, t1)]) >= k,
+                                (Nurse(n), DaySpan(t0 - self.H, t1 - 1 - self.H)), (Param("休日数", k),)))
         return out
 
     def _holiday_flag(self, n: int, t: int, side_constraints: list):

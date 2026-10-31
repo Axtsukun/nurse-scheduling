@@ -15,6 +15,7 @@
 from __future__ import annotations
 import math
 from dataclasses import dataclass, field
+from datetime import date
 import numpy as np
 
 DAY = 48                                    # 1日 = 48 スロット（30分）
@@ -122,6 +123,17 @@ class Instance:
     # 個別要望（ε制約で扱う。違反は eps.req_viol_ratio までの割合で許容）
     req_off: dict[int, list[int]] = field(default_factory=dict)                # 休み要望 n → [d]
     req_shift: dict[int, list[tuple[int, int]]] = field(default_factory=dict)  # シフト要望 n → [(d, s)]
+    # 表示方針（診断のメッセージ。docs/design/constraint-message-spec.md）。求解には使わない
+    start_date: date | None = None                 # 計画日0の暦の日付。指定すると MM/DD 表記、未指定なら「N日目(曜)」
+    nurse_names: list[str] | None = None           # 看護師の表示名（職員名・職員ID）。未指定なら N05
+    cat_names: dict[str, str] = field(default_factory=dict)   # 勤務区分名の上書き（未指定の区分は既定の表）
+
+    def __post_init__(self):
+        if self.start_date is not None and self.start_date.weekday() != self.start_weekday:
+            raise ValueError(f"start_date {self.start_date} は曜日が start_weekday={self.start_weekday}（0=月）と一致しない"
+                             f"（{self.start_date.weekday()}）")
+        if self.nurse_names is not None and len(self.nurse_names) != len(self.domain):
+            raise ValueError(f"nurse_names の長さ {len(self.nurse_names)} が看護師数 {len(self.domain)} と違う")
 
     # 層パラメータへの委譲（制約・検証器・テストはこの名前で参照する）
     min_rest = _delegate("guideline", "min_rest")

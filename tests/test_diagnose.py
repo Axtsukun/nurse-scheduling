@@ -1,6 +1,7 @@
 """診断（diagnose）: 解けない原因を「時間切れ」と「制約矛盾」に分け、矛盾なら MUS を日本語で説明する。
 hard / soft の分け方: 背景（構造・履歴・補助変数の定義）と前提（カーネル・層1）は hard、層2・層3 は soft。"""
 import dataclasses as dc
+import re
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import cpmpy as cp
@@ -53,9 +54,9 @@ def test_soft_only_conflict_needs_no_given_constraint():
     d = m.diagnose(_inst_offcount(), m.Eps(), time_limit=60)
     assert d.status == m.CONFLICT and not d.hard_only and d.mus_solver == "exact"
     assert d.groups == ["offcount"] and not d.given_items
-    assert [x.label for x in d.soft_items] == ["N00: 公休をちょうど31日"]
+    assert [x.line for x in d.soft_items] == ["offcount-0001  [公休数一致] N00 公休数=31"]
     text = d.explain()
-    assert "制約矛盾" in text and "N00: 公休をちょうど31日" in text and "層2" in text
+    assert "制約矛盾" in text and "offcount-0001  [公休数一致] N00 公休数=31" in text and "層2" in text
     assert "前提としている制約" not in text                          # 前提が不要なら、その欄は出さない
 
 
@@ -63,9 +64,11 @@ def test_soft_conflict_names_the_given_constraints_it_depends_on():
     """固定割当（カーネル・hard）と連続勤務（層3・soft）: soft は連続勤務の1窓、前提は窓内の固定割当6件だけ"""
     d = m.diagnose(_inst_fixed_week_consec(), m.Eps(), time_limit=60)
     assert d.status == m.CONFLICT and not d.hard_only and d.groups == ["fixed", "consec"]
-    assert [x.group for x in d.soft_items] == ["consec"] and "6日間に勤務は5日以内" in d.soft_items[0].label
-    assert len(d.given_items) == 6 and all(x.label.startswith("N03 ") and "日に固定" in x.label for x in d.given_items)
+    assert [x.group for x in d.soft_items] == ["consec"]
+    assert d.soft_items[0].message == "N03 6日目(土) - 11日目(木) 連続勤務日数=5"
+    assert len(d.given_items) == 6 and all(x.message.startswith("N03 ") and x.message.endswith(" 勤務=日") for x in d.given_items)
     text = d.explain()
+    assert "[固定割当] N03 6日目(土) 勤務=日" in text and "[連続勤務日数上限] N03 6日目(土) - 11日目(木) 連続勤務日数=5" in text
     assert "前提としている制約（オフにできない。カーネル・層1）" in text and "矛盾の原因になっている制約（外せる。層2・層3）" in text
     assert "入力データ（固定割当など）を見直す手もあります" in text
 
@@ -75,7 +78,7 @@ def test_hard_only_conflict_is_diagnosed_separately():
     d = m.diagnose(_inst_fixed_week_holiday(), m.Eps(), time_limit=60)
     assert d.status == m.CONFLICT and d.hard_only and d.groups == ["fixed", "holiday"]
     assert not d.soft_items and len(d.given_items) == 8
-    days = [int(x.label.split("日目")[0].split()[-1]) for x in d.given_items if x.group == "fixed"]
+    days = [int(re.search(r"(\d+)日目", x.message).group(1)) for x in d.given_items if x.group == "fixed"]
     assert days == sorted(days) == list(range(8, 15))                    # 固定割当は日付順に並ぶ
     assert sum(x.group == "fixed" for x in d.items) == 7 and sum(x.group == "holiday" for x in d.items) == 1
     text = d.explain()
@@ -89,12 +92,13 @@ def test_mus_is_unsat_and_minimal(make):
     d = m.diagnose(I, eps, time_limit=60)
     named = [x for items in m.NurseModel(I, eps).build_named().values() for x in items]
     background = [x.expr for x in named if x.hard]
-    chosen = [x for x in named if not x.hard and any(x.group == y.group and x.label == y.label for y in d.items)]
-    assert len(chosen) == len(d.items)                                    # ラベルが一意で照合できる
+    ids = {x.id for x in d.items}                                         # ID は同じ入力なら同じ → 組み直したモデルと照合できる
+    chosen = [x for x in named if x.id in ids]
+    assert len(chosen) == len(d.items) and not any(x.hard for x in chosen)
     assert not _is_sat(background, [x.expr for x in chosen])              # 矛盾している
     for i in range(len(chosen)):
         rest = [x.expr for j, x in enumerate(chosen) if j != i]
-        assert _is_sat(background, rest), chosen[i].label                 # 1件外せば解ける
+        assert _is_sat(background, rest), chosen[i].id                    # 1件外せば解ける
 
 
 def test_solver_choice_is_fixed_cpsat_for_solve_exact_for_mus():

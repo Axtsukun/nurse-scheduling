@@ -5,15 +5,17 @@
   layer  … 式の作り方の分類（L1構造 / L2系列 / L3個人 / L4横断 / L5規制 / EPS / SYM）
   scope  … 適用範囲。core（カーネル）/ law（層1）は常に有効、domain（層2）/ optional（層3）は外せる
   source … 根拠ID（docs/legal/constraints.yaml の id）
-  title  … 制約群の日本語名（診断の説明文に使う）
+  title  … 制約クラス名（日本語・短い。診断の表示 `[クラス名]` に使う。docs/design/constraint-message-spec.md）
 
-制約式の名前づけ: CPMpy は変数にしか名前を付けられず、制約式には付けられない。そこで制約メソッドは、
-式を `Labeled`（式 + 日本語のラベル）や `Aux`（補助変数の定義式）で包んで返してよい。ラベルのない式は
-「<title> #番号」と名付けられる。build_named が `Named` に正規化し、診断（MUS）が式の id からラベルを引き戻す。
+制約の名前: CPMpy は変数にしか名前を付けられず、制約式には付けられない。そこで制約メソッドは、式を
+`Item`（式 + 対象 + パラメータ）や `Aux`（補助変数の定義式）で包んで返してよい。build_named が `Named` に
+正規化し、全制約に ID（`{群}-{群内連番4桁}`）を付ける。メッセージは `Named.message` が、対象とパラメータから
+整形器（message.Renderer）で作る（診断のときだけ生成。build では文字列を作らない）。
 """
 from __future__ import annotations
 from dataclasses import dataclass
 from .instance import Instance
+from .message import Renderer
 
 SCOPES = ("core", "law", "domain", "optional")
 MANDATORY = ("core", "law")              # オフにできない適用範囲
@@ -28,14 +30,17 @@ class ConstraintSpec:
     method: str                      # NurseModel のメソッド名
     scope: str = "optional"          # 適用範囲（SCOPES）
     source: tuple[str, ...] = ()     # 根拠ID
-    title: str = ""                  # 制約群の日本語名
+    title: str = ""                  # 制約クラス名（日本語・短い）
 
 
 @dataclass(frozen=True)
-class Labeled:
-    """名前つきの制約式: 式 + その式が表す個別の規則の日本語ラベル（制約メソッドが返す）"""
+class Item:
+    """個別の規則: 式 + 対象（target）+ パラメータ（params）。制約メソッドが返す。
+    target は部品（message.Nurse / Day / DaySpan / Span / Cat / Shift / 文字列）の並び、
+    params は message.Param の並び。メッセージは、この2つから整形器が作る。"""
     expr: object
-    label: str
+    target: tuple = ()
+    params: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -45,13 +50,29 @@ class Aux:
     expr: object
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Named:
-    """正規化した制約式。診断で式（CPMpy の式）から制約群・ラベルを引き戻すために持つ"""
+    """正規化した制約。診断で式（CPMpy の式）から ID・制約クラス・メッセージを引き戻すために持つ"""
+    id: str             # {群}-{群内連番4桁}。全制約でモデル全体で一意
     group: str          # 制約群名（REGISTRY のキー）
-    label: str          # 日本語の説明（Aux は空）
+    title: str          # 制約クラス名（日本語）
     expr: object        # CPMpy の式
     hard: bool          # True なら矛盾の説明の候補にしない（relaxable=False の群、または Aux）
+    target: tuple = ()  # メッセージの対象（構造化データ）
+    params: tuple = ()  # メッセージのパラメータ（構造化データ）
+    ctx: Instance | None = None   # 整形の表示方針（開始日・表示名）の元
+
+    @property
+    def message(self) -> str:
+        """メッセージ（`<対象> <名前>=<値> …`）。対象・パラメータがなければ空（背景・補助変数の定義）"""
+        if self.ctx is None or not (self.target or self.params):
+            return ""
+        return Renderer(self.ctx).message(self.target, self.params)
+
+    @property
+    def line(self) -> str:
+        """表示行 `{ID}  [{クラス名}] {メッセージ}`"""
+        return f"{self.id}  [{self.title}] {self.message}"
 
 
 REGISTRY: dict[str, ConstraintSpec] = {}
@@ -59,7 +80,7 @@ REGISTRY: dict[str, ConstraintSpec] = {}
 
 def constraint(name: str, layer: str, relaxable: bool = True, scope: str = "optional",
                source: tuple[str, ...] = (), title: str = ""):
-    """制約メソッドを登録するデコレータ。メソッドは `list[Expression | Labeled | Aux]` を返すだけ（副作用なし）。
+    """制約メソッドを登録するデコレータ。メソッドは `list[Expression | Item | Aux]` を返すだけ（副作用なし）。
     補助変数は、そのメソッド内で生成する。"""
     if scope not in SCOPES:
         raise ValueError(f"scope は {SCOPES} のいずれか: {scope!r}")

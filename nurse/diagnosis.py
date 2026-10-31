@@ -124,14 +124,6 @@ def diagnose(I: Instance, eps: Eps, time_limit: float = 30, mus_solver: str = MU
     return Diagnosis(CONFLICT, state, items, False, times, solver)
 
 
-def _summarize(items: list[Named]) -> list[tuple[Named, int]]:
-    """同じラベルの制約を数えてまとめる（順序は保つ）"""
-    out: dict[tuple[str, str], list] = {}
-    for x in items:
-        out.setdefault((x.group, x.label), [x, 0])[1] += 1
-    return [(x, n) for x, n in out.values()]
-
-
 def explain(d: Diagnosis) -> str:
     """Diagnosis の日本語の説明文"""
     if d.status == FEASIBLE:
@@ -151,8 +143,7 @@ def explain(d: Diagnosis) -> str:
 
     def block(title: str, items: list[Named]) -> None:
         lines.extend(["", f"■ {title}（{len(items)}件）"])
-        for x, n in _summarize(items):
-            lines.append(f"  [{x.group}] {x.label}" + (f"  ×{n}" if n > 1 else ""))
+        lines.extend(f"  {x.line}" for x in items)             # `{ID}  [{クラス名}] {メッセージ}`。ID は一意なので集約しない
 
     if d.hard_only:
         block("矛盾する制約: オフにできない制約同士（入力データと法令）", d.items)

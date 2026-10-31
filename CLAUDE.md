@@ -8,8 +8,8 @@ nurse/                  # エンジン本体（依存は下向きのみ）
   instance.py           # 入力データ・層ごとのパラメータ（LawParams/DomainParams/GuidelineParams/Rules）・単純な問い合わせ
   solution.py           # 解（割当表）の読み取り部品（検証器と評価が共有）
   preprocess.py         # 時刻データから係数・集合・窓を作る純Python（ソルバー不要でテストできる）
-  naming.py             # 日本語の表示名（看護師・日・時刻・勤務区分）
-  registry.py           # @constraint の登録、名前つき式（Labeled/Aux/Named）、有効な制約の選択（selected_constraints）
+  message.py            # 制約メッセージの構造化データ（対象・パラメータ）と整形器 Renderer（日付表記・看護師名・区分名）
+  registry.py           # @constraint の登録、名前つき制約（Item/Aux/Named。ID・クラス名・メッセージ）、有効な制約の選択
   kernel.py             # 変数 x と式の部品、構造制約（scope=core）
   law.py / domain.py / optional.py   # 層1 / 層2 / 層3 の制約（ModelKernel を継承したミックスイン）
   model.py              # NurseModel（上の合成）
@@ -21,11 +21,12 @@ verify.py               # 独立検証器（制約名ごとの検査関数 CHECK
 evaluate.py             # 解の評価（集計と表示）
 bench_*.py              # 計測スクリプト
 docs/legal/             # 法令・基準の調査（制約の根拠）
+docs/design/            # 設計の仕様（制約名・メッセージの仕様 constraint-message-spec.md）
 tests/
 ```
 
 ## 制約の足し方
-1. 該当する層のモジュール（`law.py` / `domain.py` / `optional.py`）に、`@constraint(名前, layer, relaxable, scope, source, title)` を付けたメソッドを書く。`list[Expression | Labeled | Aux]` を返し、補助変数はその中で作る。個別の規則は `Labeled(式, 日本語ラベル)`、補助変数の定義式は `Aux(式)` で包む（`title` と全 soft 制約のラベルは tests/test_named.py が検査）。
+1. 該当する層のモジュール（`law.py` / `domain.py` / `optional.py`）に、`@constraint(名前, layer, relaxable, scope, source, title)` を付けたメソッドを書く。`list[Expression | Item | Aux]` を返し、補助変数はその中で作る。個別の規則は `Item(式, 対象, パラメータ)`（文字列は組み立てない。`message.py` の部品 `Nurse`・`Day`・`DaySpan`・`Span`・`Cat`・`Shift`・`Clock` と `Param` を使う）、補助変数の定義式は `Aux(式)` で包む。`title` は短い制約クラス名（片側の群は方向を含む。例: `人数制約下限`）。全 soft 制約がメッセージを持つことは tests/test_named.py が検査する。
 2. パラメータは層ごとのデータクラス（`instance.py`）に足す。生成時に検証する（`__post_init__`）。
 3. `verify.py` に同名の検査関数を書き、`CHECKS` に登録する（式を使わず、元の規則から直接数える）。対応漏れは `tests/test_layers.py` が検出する。
 4. 前処理（窓・係数）が必要なら `preprocess.py` に純Pythonで書き、総当たりと照合するテストを `tests/` に足す。
@@ -38,8 +39,8 @@ tests/
 - **時刻は30分単位の整数**。0=当日0:00、48=翌日0:00。勤務は開始した暦日に属する（深夜0:30開始は start=1）。
 - **勤務の値はデータ**（`ShiftDef`）。禁止遷移・人数制約・夜勤時間はすべて時刻から生成する。勤務名をコードに直書きしない（`"休"` のみ例外）。
 - **x は疎**：看護師 n の取れる値 D_n についてのみ変数を作る（`M.xv[n]`、`M.col[n]`）。
-- **制約は1定義＝1メソッド**：`@constraint(name, layer, relaxable, scope, source, title)` で登録し、`list[Expression | Labeled | Aux]` を返すだけ（副作用なし）。補助変数はそのメソッド内で生成する。
-- **制約式の名前**：CPMpy は制約式に名前を付けられない。式を `Labeled`（日本語ラベル）/ `Aux`（補助変数の定義。hard）で包み、`build_named()` が `Named` にする。`build()` は式だけを返す（求解用。式は名前の有無で変わらない）。
+- **制約は1定義＝1メソッド**：`@constraint(name, layer, relaxable, scope, source, title)` で登録し、`list[Expression | Item | Aux]` を返すだけ（副作用なし）。補助変数はそのメソッド内で生成する。
+- **制約の名前（決定事項。仕様は docs/design/constraint-message-spec.md）**：CPMpy は制約式に名前を付けられない。式を `Item`（対象・パラメータ）/ `Aux`（補助変数の定義。hard）で包み、`build_named()` が `Named` にする。`Named` は **ID**（`{群}-{群内連番4桁}`。全制約に付け、同じ入力なら同じ ID。例 `cover-0012`）・群・**クラス名**（日本語・短い）・**メッセージ**を持つ。メッセージは `<対象> <名前>=<値>` で、構造化データから整形器が**診断のときだけ**作る（`build()` は文字列を作らない）。表示行は `{ID}  [{クラス名}] {メッセージ}`（例 `cover-0012  [人数制約下限] 11/03 00:00 - 11/03 08:30 勤務者数=3`）。日付は `Instance.start_date` があれば `MM/DD HH:mm`、なければ `N日目(曜)`。看護師名・区分名は `Instance.nurse_names`・`cat_names`。`build()` は式だけを返す（求解用。式は名前の有無で変わらない）。
 - **層構成**（`scope`）：`core`（カーネル）／`law`（層1 労働法規）／`domain`（層2 病院・看護職共通）／`optional`（層3 努力義務・要望）。core と law はオフにできない（`selected_constraints` が `ValueError`）。層2・3は `Rules.off` で外す。パラメータは層ごとに `LawParams` / `DomainParams` / `GuidelineParams`、まとめて `Instance.rules`。`layer`（L1〜L5）は式の作り方の分類で、`scope` とは別の軸。
 - **ソルバーの選択（決定事項）**：**求解は CP-SAT**（`solver.SOLVE_SOLVER = "ortools"`）、**MUS の計算は exact**（`diagnosis.MUS_SOLVER = "exact"`）。実測（README 4.5 節）の根拠あり。exact が使えないときは黙って別のソルバーに替えず、エラーにする。`solve(solver=...)` と `diagnose(mus_solver=...)` の引数は実験用で、既定値を変えるときはユーザーに確認する。
 - **診断は別モデル**：通常求解に指示変数を入れない。解けない原因は「時間切れ」と「制約矛盾」の2つ。`diagnose()` はまず通常モデルを CP-SAT で解き、実行不能と確定したときだけ `cpmpy.tools.mus` を **exact**（PBソルバー）で使う。実測（README 4.5 節）では、14条件すべてで CP-SAT の1.2〜3.3倍速い（中央値1.6倍）。`mus` に時間制限が無いので、平均値の制約（72時間ルール）を極端に締めた矛盾などでは `diagnose` が戻らないことがある。
