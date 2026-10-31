@@ -114,6 +114,23 @@ def test_messages_of_every_group_with_start_date():
     assert first("soft_off") == "soft_off-0001  [希望休違反数上限] 要望数=60 違反数=10"
 
 
+def test_spec_table_matches_the_implementation():
+    """仕様書 8 節の表（群・クラス名・メッセージの例）を読み取り、全機能を有効にした実装の出力と照合する"""
+    spec = (pathlib.Path(__file__).resolve().parents[1] / "docs/design/constraint-message-spec.md").read_text(encoding="utf-8")
+    table = spec.split("## 8.", 1)[1].split("## 9.", 1)[0]
+    rows = re.findall(r"^\| `([\w]+)` \| (\S+) \| (.+) \|$", table, flags=re.M)
+    named = _all_features()
+    assert [g for g, _, _ in rows] == list(named)                            # 群の並びも一致
+    for g, title, example in rows:
+        soft = [x for x in named[g] if not x.hard]
+        assert named[g][0].title == title, g
+        if not soft:
+            assert example.startswith("（"), g                               # 背景の群はメッセージなし
+            continue
+        got = soft[-1:] if g == "72h" else soft[:2] if g == "night_band" else soft[:1]
+        assert re.findall(r"`([^`]+)`", example) == [x.message for x in got], g
+
+
 def test_messages_of_remaining_groups():
     """全機能を有効にしたときにだけ現れる群（休み連続日数・勤務週末・整列・要望）のメッセージ"""
     named = _all_features()
