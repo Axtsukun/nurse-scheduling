@@ -5,6 +5,8 @@ CPMpy + OR-Tools CP-SAT による看護師勤務表作成エンジン。純PB（
 ## ファイル構成
 ```
 nurse/                  # エンジン本体（依存は下向きのみ）
+  codes.py              # リターンコード（ReturnCode）と例外（InputError / SolverUnavailableError / InternalError）
+  config.py             # 設定ファイル nurse.properties の読み込み（求解・MUS の時間制限）
   instance.py           # 入力データ・層ごとのパラメータ（LawParams/DomainParams/GuidelineParams/Rules）・単純な問い合わせ
   solution.py           # 解（割当表）の読み取り部品（検証器と評価が共有）
   preprocess.py         # 時刻データから係数・集合・窓を作る純Python（ソルバー不要でテストできる）
@@ -16,7 +18,8 @@ nurse/                  # エンジン本体（依存は下向きのみ）
   solver.py             # solve（SolveResult）・roster
   diagnosis.py          # 解けないときの診断（時間切れ / 制約矛盾 → MUS を exact で求め、日本語で説明）
   synthetic.py          # 合成インスタンス・個別要望の付与
-nurse_csp.py            # 互換の窓口（import nurse_csp as m）と CLI
+nurse_csp.py            # 互換の窓口（import nurse_csp as m）と CLI（終了コード = ReturnCode）
+nurse.properties        # 設定ファイル（solve.time_limit / mus.time_limit。既定は各30秒）
 verify.py               # 独立検証器（制約名ごとの検査関数 CHECKS）
 evaluate.py             # 解の評価（集計と表示）
 bench_*.py              # 計測スクリプト
@@ -42,12 +45,14 @@ tests/
 - **x は疎**：看護師 n の取れる値 D_n についてのみ変数を作る（`M.xv[n]`、`M.col[n]`）。
 - **制約は1定義＝1メソッド**：`@constraint(name, layer, relaxable, scope, source, title)` で登録し、`list[Expression | Item | Aux]` を返すだけ（副作用なし）。補助変数はそのメソッド内で生成する。
 - **制約の名前（決定事項。仕様は docs/design/constraint-message-spec.md）**：CPMpy は制約式に名前を付けられない。式を `Item`（対象・パラメータ）/ `Aux`（補助変数の定義。hard）で包み、`build_named()` が `Named` にする。`Named` は **ID**（`{群}-{群内連番4桁}`。全制約に付け、同じ入力なら同じ ID。例 `cover-0012`）・群・**クラス名**（日本語・短い）・**メッセージ**を持つ。メッセージは `<対象> <名前>=<値>` で、構造化データから整形器が**診断のときだけ**作る（`build()` は文字列を作らない）。表示行は `{ID}  [{クラス名}] {メッセージ}`（例 `cover-0012  [人数制約下限] 11/03 12:30 - 11/03 13:00 勤務者数=10`）。日付は `Instance.start_date` があれば `MM/DD HH:mm`、なければ `N日目(曜)`。看護師名・区分名は `Instance.nurse_names`・`cat_names`。`build()` は式だけを返す（求解用。式は名前の有無で変わらない）。
-- **層構成**（`scope`）：`core`（カーネル）／`law`（層1 労働法規）／`domain`（層2 病院・看護職共通）／`optional`（層3 努力義務・要望）。core と law はオフにできない（`selected_constraints` が `ValueError`）。層2・3は `Rules.off` で外す。パラメータは層ごとに `LawParams` / `DomainParams` / `GuidelineParams`、まとめて `Instance.rules`。`layer`（L1〜L5）は式の作り方の分類で、`scope` とは別の軸。
+- **層構成**（`scope`）：`core`（カーネル）／`law`（層1 労働法規）／`domain`（層2 病院・看護職共通）／`optional`（層3 努力義務・要望）。core と law はオフにできない（`selected_constraints` が `InputError`。`ValueError` の一種）。層2・3は `Rules.off` で外す。パラメータは層ごとに `LawParams` / `DomainParams` / `GuidelineParams`、まとめて `Instance.rules`。`layer`（L1〜L5）は式の作り方の分類で、`scope` とは別の軸。
 - **ソルバーの選択（決定事項）**：**求解は CP-SAT**（`solver.SOLVE_SOLVER = "ortools"`）、**MUS の計算は exact**（`diagnosis.MUS_SOLVER = "exact"`）。実測（README 4.5 節）の根拠あり。exact が使えないときは黙って別のソルバーに替えず、エラーにする。`solve(solver=...)` と `diagnose(mus_solver=...)` の引数は実験用で、既定値を変えるときはユーザーに確認する。
-- **診断は別モデル**：通常求解に指示変数を入れない。解けない原因は「時間切れ」と「制約矛盾」の2つ。`diagnose()` はまず通常モデルを CP-SAT で解き、実行不能と確定したときだけ `cpmpy.tools.mus` を **exact**（PBソルバー）で使う。実測（README 4.5 節）では、14条件すべてで CP-SAT の1.2〜3.3倍速い（中央値1.6倍）。`mus` に時間制限が無いので、平均値の制約（72時間ルール）を極端に締めた矛盾などでは `diagnose` が戻らないことがある。
+- **診断は別モデル**：通常求解に指示変数を入れない。解けない原因は「時間切れ」と「制約矛盾」の2つ。`diagnose()` はまず通常モデルを CP-SAT で解き、実行不能と確定したときだけ `cpmpy.tools.mus` を **exact**（PBソルバー）で使う。実測（README 4.5 節）では、14条件すべてで CP-SAT の1.2〜3.3倍速い（中央値1.6倍）。`mus` 自体には時間制限が無いので、平均値の制約（72時間ルール）を極端に締めた矛盾などでは戻らなかった。そのため **MUS に時間制限を掛ける**（決定事項: 事前候補取得 + 子プロセスで打ち切り。下記）。
   - **hard / soft の分け方**（MUS に別々に渡す）: 背景（構造・履歴・補助変数の定義。`relaxable=False` と `Aux`）と前提（カーネル・層1 = `MANDATORY`。固定割当・労基法の休日）が hard、層2・層3（`TOGGLEABLE`）が soft。
   - **手順**: ①前提だけで矛盾するなら、前提の中から MUS（`hard_only=True`: 入力データと法令の矛盾）。②そうでなければ soft の MUS を**一段階**で求め（制約群を単位にした先行の絞り込みは、実測で12/12条件で一段階より遅かったので採用しない）、③その矛盾に関わる前提だけを追加で絞る。
+  - **MUS の時間制限**（`diagnose(mus_time_limit=…)`、MUS 1回ごと。既定は `nurse.properties` の `mus.time_limit`＝30秒）：①`_bounded_mus` が、MUS の前に仮定つきの求解 1 回でコア（事前候補。最小とは限らない）を取る → ②`cpmpy.tools.mus` を fork した子プロセスで実行して打ち切る（式を pickle せず、結果は添字で返す。fork が使えない環境では黙って外さず `SolverUnavailableError`）→ ③打ち切りなら事前候補を返し `Diagnosis.minimal=False`。事前候補も取れなければ items が空（矛盾は確定、原因は特定できず）。
   - 結果は `Diagnosis`（status は feasible / timeout / conflict。`items` / `soft_items` / `given_items`）で、`explain()` が日本語で説明する。時間切れでは MUS を求めない（矛盾かどうか不明なため）。
+- **設定とリターンコード（決定事項）**：求解と MUS の時間制限は `nurse.properties`（`solve.time_limit`・`mus.time_limit`、既定は各30秒）に外出しし、`solve()`・`diagnose()` は引数を省略するとこれを使う（`config.load_settings`。呼ぶたびに読み直す）。結果は `ReturnCode`（0 正常 / 10 求解が時間切れ / 20 制約矛盾 / 21 MUS が時間切れ / 22 原因を特定できず / 30 入力・設定の誤り / 40 ソルバー・環境 / 50 内部エラー）で表し、`Diagnosis.code` と CLI の終了コードに使う。入力・設定の誤りは `InputError`（`ValueError` の一種）、環境は `SolverUnavailableError`、内部は `InternalError`（どちらも `RuntimeError` の一種）。新しい例外・状態を足すときは `nurse/codes.py` にコードを足す。
 - **パターン化（週パターン列挙）は採用しない**（規模が約100倍、CSPではLP緩和の利点が活きない）。
 
 ## 前提と教訓（メモ。入力の定義と設計の判断を誤らないために）

@@ -5,6 +5,7 @@
 from __future__ import annotations
 from .instance import (Instance, DAY, WEEK, FOUR_WEEKS, HOLIDAY_WEEKLY, HOLIDAY_4W4D,
                        inclusion_threshold)
+from .codes import InputError
 
 
 def night_units(I: Instance, s: int) -> int:
@@ -54,7 +55,7 @@ def holiday_windows(I: Instance) -> list[tuple[int, int, int]]:
         span, need = FOUR_WEEKS, 4
         starts = list(range(H + law.four_week_origin, H + T, FOUR_WEEKS))
     else:
-        raise ValueError(f"holiday_rule: {law.holiday_rule}")
+        raise InputError(f"holiday_rule: {law.holiday_rule}")
     return [(t0, t0 + span, need) for t0 in starts if t0 >= 0 and H < t0 + span <= H + T]
 
 
