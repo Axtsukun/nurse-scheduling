@@ -59,26 +59,23 @@ def holiday_windows(I: Instance) -> list[tuple[int, int, int]]:
 
 
 def cover_spans(I: Instance, d: int) -> list[tuple[frozenset, int, int, int]]:
-    """日 d の人数制約 (C_j, r_j, a_j, b_j) の列。C_j は区間 j を全時間覆う (日オフセット δ∈{−1,0}, s) の集合。
-    基本区間に分割 → 同一被覆の統合(max r) → 支配除去（C_i ⊂ C_j かつ r_i ≥ r_j なら j は冗長）。
-    [a_j, b_j) は統合した基本区間の最小の始点〜最大の終点（診断の説明文で時間帯を示すために使う）。"""
+    """日 d の人数制約 (C_j, r_j, a_j, b_j) の列。C_j は区間 [a_j, b_j) を全時間覆う (日オフセット δ∈{−1,0}, s) の集合。
+    需要は番（需要区間）ごとに一定。需要区間を、勤務の始業・終業の境で基本区間に分け、基本区間ごとに1制約にする
+    （[a_j, b_j) はその基本区間そのもの。統合しないので、診断の説明の時間帯は実際の制約の区間と常に一致する）。
+    そのうえで支配除去: C_i ⊂ C_j かつ r_i ≥ r_j なら j は冗長。"""
     W = [s for s, sd in enumerate(I.shifts) if sd.is_work]
     segs = [(off, s, I.shifts[s].start + off * DAY, I.shifts[s].end + off * DAY)
             for off in (-1, 0) for s in W]
     bps = {0, DAY} | {a for a, _, _ in I.demand[d]} | {b for _, b, _ in I.demand[d]}
     bps |= {p for _, _, a, b in segs for p in (a, b) if 0 < p < DAY}
     bps = sorted(bps)
-    req = lambda t: max((r for a, b, r in I.demand[d] if a <= t < b), default=0)
-    best: dict[frozenset, tuple[int, int, int]] = {}
+    req = lambda t: next((r for a, b, r in I.demand[d] if a <= t < b), 0)     # 需要区間は重ならない（Instance が検査）
+    base = []
     for a, b in zip(bps, bps[1:]):
         r = req(a)
-        if r <= 0:
-            continue
-        C = frozenset((off, s) for off, s, sa, sb in segs if sa <= a and b <= sb)
-        r0, a0, b0 = best.get(C, (0, a, b))
-        best[C] = (max(r0, r), min(a0, a), max(b0, b))
-    return [(C, r, a, b) for C, (r, a, b) in best.items()
-            if not any(C2 < C and r2 >= r for C2, (r2, _, _) in best.items())]
+        if r > 0:
+            base.append((frozenset((off, s) for off, s, sa, sb in segs if sa <= a and b <= sb), r, a, b))
+    return [x for x in base if not any(y[0] < x[0] and y[1] >= x[1] for y in base)]
 
 
 def cover_intervals(I: Instance, d: int) -> list[tuple[frozenset, int]]:

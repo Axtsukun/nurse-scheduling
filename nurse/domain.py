@@ -2,22 +2,22 @@
 from __future__ import annotations
 import cpmpy as cp
 from .kernel import ModelKernel
-from .registry import constraint, Labeled, Aux
-from .instance import inclusion_threshold, night_band
-from .naming import nurse_name, day_name, slot_name, cat_name
+from .registry import constraint, Item, Aux
+from .instance import DAY, inclusion_threshold, night_band
+from .message import Nurse, Day, Span, Cat, Param
 from .preprocess import cover_spans, night_units
 
 
 class DomainConstraints(ModelKernel):
 
-    @constraint("offcount", "L3", scope="domain", title="公休数")
+    @constraint("offcount", "L3", scope="domain", title="公休数一致")
     def c_offcount(self):
         """公休数: Σ_d x[n,H+d,休] = F_n"""
-        return [Labeled(cp.sum([self.x(n, self.t(d), self.OFF) for d in range(self.T)]) == self.I.off_days[n],
-                        f"{nurse_name(n)}: 公休をちょうど{self.I.off_days[n]}日")
+        return [Item(cp.sum([self.x(n, self.t(d), self.OFF) for d in range(self.T)]) == self.I.off_days[n],
+                     (Nurse(n),), (Param("公休数", self.I.off_days[n]),))
                 for n in self.N]
 
-    @constraint("cover", "L4", scope="domain", source=("REIMB-NIGHT-2",), title="時間帯ごとの必要人数")
+    @constraint("cover", "L4", scope="domain", source=("REIMB-NIGHT-2",), title="人数制約下限")
     def c_cover(self):
         """区間人数: Σ_n Σ_{(δ,s)∈C_j} x[n,H+d+δ,s] ≥ r_j（基本区間＋支配除去後の j）"""
         out = []
@@ -25,19 +25,18 @@ class DomainConstraints(ModelKernel):
             for C, r, a, b in cover_spans(self.I, d):
                 terms = [v for n in self.N for off, s in C
                          if (v := self.x(n, self.t(d) + off, s)) is not None]
-                out.append(Labeled(cp.sum(terms) >= r,
-                                   f"{day_name(self.I, d)} {slot_name(a)}〜{slot_name(b)}: 勤務中の看護師が{r}人以上"))
+                out.append(Item(cp.sum(terms) >= r, (Span(d * DAY + a, d * DAY + b),), (Param("勤務者数", r),)))
         return out
 
-    @constraint("skill", "L4", scope="domain", title="夜勤リーダー資格者の配置")
+    @constraint("skill", "L4", scope="domain", title="リーダー数下限")
     def c_skill(self):
         """リーダー: Σ_{n∈L} Σ_{s: k(s)=k} x[n,H+d,s] ≥ 1（k ∈ leader_cats）"""
-        return [Labeled(cp.sum([v for n in self.I.seniors for v in self.cat(n, self.t(d), (k,))]) >= 1,
-                        f"{day_name(self.I, d)}: {cat_name(k)}に夜勤リーダー資格者が1人以上")
+        return [Item(cp.sum([v for n in self.I.seniors for v in self.cat(n, self.t(d), (k,))]) >= 1,
+                     (Day(d), Cat(k)), (Param("リーダー数", 1),))
                 for d in range(self.T) for k in self.I.leader_cats]
 
     @constraint("72h", "L5", scope="domain", source=("REIMB-72H", "REIMB-NIGHT-WINDOW", "REIMB-72H-EXCLUDE"),
-                title="月平均夜勤時間72時間以下")
+                title="夜勤時間平均上限")
     def c_72h(self):
         """月平均夜勤72h:  Σ_{n∈𝒩'} z_n (h_n − Λ) ≤ q,  h_n = Σ_{d,s} u_s x[n,H+d,s]
         𝒩' = 夜勤専従者を除く看護師。z_n ⇔ h_n ≥ θ_n（算入）。看護師ごとの項は _night_term が作る。"""
@@ -50,8 +49,8 @@ class DomainConstraints(ModelKernel):
                 hours.append(term[0])
                 included.append(term[1])
         if hours:
-            out.append(Labeled(cp.sum(hours) <= I.limit_units * cp.sum(included) + I.budget_units,
-                               f"病棟の月平均夜勤時間が{I.limit_units / 2:g}時間以下（算入者の平均。診療報酬の施設基準）"))
+            out.append(Item(cp.sum(hours) <= I.limit_units * cp.sum(included) + I.budget_units,
+                            ("病棟",), (Param("月平均夜勤時間", I.limit_units / 2, "h"),)))
         return out
 
     def _night_hour_bounds(self, n: int, S: list[int], u: dict[int, int]) -> tuple[int, int]:

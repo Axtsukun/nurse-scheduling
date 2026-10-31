@@ -5,8 +5,8 @@
 from __future__ import annotations
 import cpmpy as cp
 from .instance import Instance, Eps, OFF_NAME
-from .naming import nurse_name, day_name
-from .registry import REGISTRY, ConstraintSpec, Labeled, Aux, Named, constraint, selected_constraints
+from .message import Nurse, Day, Shift, Param
+from .registry import REGISTRY, ConstraintSpec, Item, Aux, Named, constraint, selected_constraints
 
 
 class ModelKernel:
@@ -72,44 +72,44 @@ class ModelKernel:
 
     def build_named(self, enabled: set[str] | None = None) -> dict[str, list[Named]]:
         """有効な制約を {制約名: [Named…]} で返す。有効な集合は selected_constraints が決める。
-        制約メソッドが返す Expression / Labeled / Aux を Named（制約群・日本語ラベル・hard か）に正規化する。"""
+        制約メソッドが返す Expression / Item / Aux を Named（ID・制約クラス・対象・パラメータ・hard か）に正規化する。
+        ID は `{群}-{群内連番4桁}`（連番は、その群の制約メソッドが返した順。補助変数の定義も数える）。"""
         names = selected_constraints(self.I, enabled)
         self.active = frozenset(names)
         return {nm: [self._named(REGISTRY[nm], i, c)
                      for i, c in enumerate(getattr(self, REGISTRY[nm].method)())] for nm in names}
 
-    @staticmethod
-    def _named(spec: ConstraintSpec, i: int, c) -> Named:
-        """制約メソッドの戻り値の1要素を Named にする。ラベルのない式は「<title> #番号」と名付ける。
-        hard = relaxable=False の群、または Aux（補助変数の定義）"""
+    def _named(self, spec: ConstraintSpec, i: int, c) -> Named:
+        """制約メソッドの戻り値の1要素を Named にする（i は群内の0始まりの位置）。
+        hard = relaxable=False の群、または Aux（補助変数の定義）。メッセージはここでは作らない（Named.message が遅延生成）"""
+        ident = f"{spec.name}-{i + 1:04d}"
         if isinstance(c, Aux):
-            return Named(spec.name, "", c.expr, True)
-        if isinstance(c, Labeled):
-            return Named(spec.name, c.label, c.expr, not spec.relaxable)
-        return Named(spec.name, f"{spec.title or spec.name} #{i + 1}", c, not spec.relaxable)
+            return Named(ident, spec.name, spec.title, c.expr, True, ctx=self.I)
+        if isinstance(c, Item):
+            return Named(ident, spec.name, spec.title, c.expr, not spec.relaxable, c.target, c.params, self.I)
+        return Named(ident, spec.name, spec.title, c, not spec.relaxable, ctx=self.I)
 
     def build(self, enabled: set[str] | None = None) -> dict[str, list]:
-        """有効な制約を {制約名: 式のリスト} で返す（求解用。名前・ラベルは付けない）"""
+        """有効な制約を {制約名: 式のリスト} で返す（求解用）"""
         return {nm: [x.expr for x in items] for nm, items in self.build_named(enabled).items()}
 
     # ---- カーネルの構造制約（常に有効） ----
-    @constraint("struct", "L1", relaxable=False, scope="core", title="各時点でちょうど1つの勤務")
+    @constraint("struct", "L1", relaxable=False, scope="core", title="勤務一意")
     def c_struct(self):
         """Σ_{s∈D_n} x[n,t,s] = 1（ExactlyOne）"""
         return [c for n in self.N for c in (self.xv[n].sum(axis=1) == 1)]
 
-    @constraint("history", "L1", relaxable=False, scope="core", title="前月末の実績")
+    @constraint("history", "L1", relaxable=False, scope="core", title="履歴固定")
     def c_history(self):
         """x[n,t,h_{n,t}] = 1（t < H, 前月末の実績）"""
         return [self.x(n, t, int(self.I.history[n, t])) == 1
                 for n in self.N for t in range(self.H)]
 
-    @constraint("fixed", "L3", scope="core", source=("LAW-PAID-LEAVE",), title="固定割当（確定休・有休など）")
+    @constraint("fixed", "L3", scope="core", source=("LAW-PAID-LEAVE",), title="固定割当")
     def c_fixed(self):
         """固定割当 x[n,H+d,s] = 1。fixed_only の値は固定日以外で x = 0（この側は定義的なので Aux）"""
         I = self.I
-        out = [Labeled(self.x(n, self.t(d), s) == 1,
-                       f"{nurse_name(n)} {day_name(I, d)}: {I.shifts[s].name}に固定（確定休・有休など）")
+        out = [Item(self.x(n, self.t(d), s) == 1, (Nurse(n), Day(d)), (Param("勤務", Shift(s)),))
                for (n, d), s in sorted(I.fixed.items())]               # 看護師・日付順（説明が読みやすい）
         for n in self.N:
             for s in self.dom[n]:

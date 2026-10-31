@@ -2,6 +2,7 @@
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import nurse_csp as m
+from nurse.preprocess import cover_spans
 
 I = m.synthetic()
 S = I.shifts
@@ -49,3 +50,28 @@ def test_cover_intervals_sound():
                     ok = True
                     break
             assert ok, (d, sorted(C), r)
+
+
+def test_cover_spans_are_base_intervals_and_do_not_overlap():
+    """人数制約の区間は基本区間そのもの（統合しない）。互いに重ならず、それぞれ1つの需要区間に収まる。
+    要求人数はその区間の需要と一致する（番の中で一定）"""
+    for d in range(I.n_days):
+        spans = sorted((a, b, r) for _, r, a, b in cover_spans(I, d))
+        assert all(b1 <= a2 for (_, b1, _), (a2, _, _) in zip(spans, spans[1:])), (d, spans)
+        for a, b, r in spans:
+            assert any(da <= a and b <= db and r == dr for da, db, dr in I.demand[d]), (d, a, b, r)
+
+
+def test_demand_must_cover_the_day_without_gaps_or_overlaps():
+    """需要は番ごとに一定で、1日（0〜DAY）を空きなく重なりなく覆う。需要なしの時間帯は r=0 で明示する"""
+    import dataclasses as dc
+    import pytest
+    ok = [(0, 17, 3), (17, 31, 0), (31, m.DAY, 4)]                       # r=0 の番は許す
+    bad = {"空き": [(0, 10, 3), (12, m.DAY, 3)], "先頭が0でない": [(2, m.DAY, 3)], "終端がDAYでない": [(0, 40, 3)],
+           "重なり": [(0, 30, 3), (20, m.DAY, 3)], "逆順": [(0, 0, 3), (0, m.DAY, 3)], "負の人数": [(0, m.DAY, -1)]}
+    dc.replace(I, demand=[ok] * I.n_days)
+    for name, bands in bad.items():
+        with pytest.raises(ValueError):
+            dc.replace(I, demand=[bands] * I.n_days)
+    with pytest.raises(ValueError):                                       # 日数が違う
+        dc.replace(I, demand=[ok] * (I.n_days - 1))

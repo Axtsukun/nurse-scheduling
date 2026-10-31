@@ -52,8 +52,9 @@ def _fixed_and_soft(rng: random.Random, S: list[ShiftDef], n: int, T: int):
     return fixed, soft
 
 
-def synthetic(n_full: int = 26, n_part: int = 4, T: int = 30, seed: int = 0) -> Instance:
+def synthetic(n_full: int = 26, n_part: int = 4, T: int = 30, seed: int = 0, start_date=None) -> Instance:
     """合成インスタンス。n_full/n_part は常勤・パートの人数、T は計画日数、seed は確定休・希望休の乱数。
+    start_date は計画日0の日付（月曜日であること。診断のメッセージを MM/DD 表記にする。未指定なら N日目(曜)）。
     需要は平日 [0:00-8:30) 3人・[8:30-17:00) 10人・[17:00-24:00) 3人（土日は日中6人）を常勤数に比例して拡大する。"""
     rng = random.Random(seed)
     S = _shift_catalog()
@@ -69,7 +70,7 @@ def synthetic(n_full: int = 26, n_part: int = 4, T: int = 30, seed: int = 0) -> 
                     seniors=list(range(round(10 * f))), leader_cats=("E", "N"), night_cats=("E", "N"),
                     night_avg=2 * R(3) * T / n_full,
                     off_days=[WORK_DAYS_OFF_FULL] * n_full + [OFF_DAYS_PART] * n_part,
-                    fixed=fixed, soft_off=soft)
+                    fixed=fixed, soft_off=soft, start_date=start_date)
 
 
 def synthetic_for(n_nurses: int, T: int = 30, seed: int = 0) -> Instance:
