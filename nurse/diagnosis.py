@@ -25,12 +25,13 @@ import time
 import cpmpy as cp
 from cpmpy.tools import mus
 from cpmpy.tools.explain.utils import make_assump_model
+from .codes import ReturnCode, SolverUnavailableError, InternalError
+from .config import load_settings
 from .instance import Instance, Eps
 from .registry import REGISTRY, MANDATORY, TOGGLEABLE, Named
 from .solver import solve, SOLVE_SOLVER
 
 MUS_SOLVER = "exact"                       # 決定事項: MUS の計算は exact。変更する場合はユーザーに確認する
-MUS_TIME_LIMIT = 60.0                      # MUS 1回あたりの時間制限（秒）。soft の MUS と前提の MUS にそれぞれ適用
 FEASIBLE, TIMEOUT, CONFLICT = "feasible", "timeout", "conflict"
 SCOPE_NAMES = {"core": "カーネル", "law": "層1 労働法規", "domain": "層2 病院・看護職共通", "optional": "層3 任意"}
 
@@ -45,6 +46,17 @@ class Diagnosis:
     times: dict[str, float] = field(default_factory=dict)     # solve / mus_soft / mus_given の秒数
     mus_solver: str = ""                                      # MUS に使ったソルバー
     minimal: bool = True                                      # CONFLICT: False なら時間制限で打ち切り（最小でない可能性。items が空なら特定できず）
+
+    @property
+    def code(self) -> ReturnCode:
+        """リターンコード（nurse/codes.py）: 解あり OK / 求解の時間切れ / 制約矛盾（最小・MUS 時間切れ・原因不明）"""
+        if self.status == FEASIBLE:
+            return ReturnCode.OK
+        if self.status == TIMEOUT:
+            return ReturnCode.SOLVE_TIME_LIMIT
+        if not self.items:
+            return ReturnCode.CONFLICT_UNIDENTIFIED
+        return ReturnCode.CONFLICT if self.minimal else ReturnCode.CONFLICT_MUS_TIME_LIMIT
 
     @property
     def groups(self) -> list[str]:
@@ -70,7 +82,7 @@ class Diagnosis:
 def _require_solver(name: str) -> str:
     """MUS に使うソルバーが導入済みか確かめる。未導入なら（黙って別のソルバーに替えず）RuntimeError"""
     if name not in cp.SolverLookup.supported():
-        raise RuntimeError(f"MUS ソルバー {name!r} が使えない（導入済み: {cp.SolverLookup.supported()}）。"
+        raise SolverUnavailableError(f"MUS ソルバー {name!r} が使えない（導入済み: {cp.SolverLookup.supported()}）。"
                            "exact は `pip install exact` で入れる")
     return name
 
@@ -80,7 +92,7 @@ def _mus_in_child(soft: list, hard: list, solver: str, budget: float):
     子は親のメモリをそのまま引き継ぐ（式を pickle しない）ので、結果は soft の添字で返す。
     fork が使えない環境では、時間制限を黙って外さず RuntimeError にする。"""
     if "fork" not in multiprocessing.get_all_start_methods():
-        raise RuntimeError("MUS の時間制限には fork が必要（この環境では使えない）。mus_time_limit を使うには Linux などで実行する")
+        raise SolverUnavailableError("MUS の時間制限には fork が必要（この環境では使えない）。mus_time_limit を使うには Linux などで実行する")
     ctx = multiprocessing.get_context("fork")
     index = {id(e): i for i, e in enumerate(soft)}
 
@@ -99,13 +111,13 @@ def _mus_in_child(soft: list, hard: list, solver: str, budget: float):
             return None
         kind, payload = recv.recv()
     except EOFError:
-        raise RuntimeError("MUS の子プロセスが結果を返さずに終了した") from None
+        raise InternalError("MUS の子プロセスが結果を返さずに終了した") from None
     finally:
         if proc.is_alive():
             proc.kill()
         proc.join()
     if kind == "error":
-        raise RuntimeError(f"MUS の計算が失敗した: {payload}")
+        raise InternalError(f"MUS の計算が失敗した: {payload}")
     return payload
 
 
@@ -117,7 +129,7 @@ def _bounded_mus(soft: list, hard: list, solver: str, budget: float):
     s = cp.SolverLookup.get(solver, model)
     by_assump = dict(zip(assump, exprs))
     if s.solve(assumptions=assump, time_limit=budget):
-        raise RuntimeError("MUS: 矛盾するはずのモデルが充足可能だった")
+        raise InternalError("MUS: 矛盾するはずのモデルが充足可能だった")
     if s.status().exitstatus.name != "UNSATISFIABLE":
         return None                                                 # 事前候補が時間内に取れなかった
     candidate = [by_assump[a] for a in s.get_core()]
@@ -135,8 +147,8 @@ def _check(exprs: list, time_limit: float) -> str:
     return "unsat" if s.status().exitstatus.name == "UNSATISFIABLE" else "unknown"
 
 
-def diagnose(I: Instance, eps: Eps, time_limit: float = 30, mus_solver: str = MUS_SOLVER,
-             mus_time_limit: float = MUS_TIME_LIMIT) -> Diagnosis:
+def diagnose(I: Instance, eps: Eps, time_limit: float | None = None, mus_solver: str = MUS_SOLVER,
+             mus_time_limit: float | None = None) -> Diagnosis:
     """解けるか調べ、解けなければ原因（時間切れ / 制約矛盾）を返す。
     1. 通常のモデルを求解用のソルバー（CP-SAT）で解く。解ければ FEASIBLE、時間切れなら TIMEOUT（矛盾かどうかは不明）。
     2. 実行不能と確定したときだけ MUS を求める（指示変数つきのモデルは桁違いに遅いので、解ける問題では解かない）。
@@ -144,7 +156,11 @@ def diagnose(I: Instance, eps: Eps, time_limit: float = 30, mus_solver: str = MU
        b. そうでなければ、前提を hard として固定し、soft（層2・層3）の MUS を求め、
           その矛盾に関わる前提（例: 固定割当）を追加で絞り込む。
     MUS は mus_time_limit 秒（soft と前提でそれぞれ）で打ち切る。打ち切ると、事前候補（最小とは限らない矛盾の集合）を
-    返し、minimal=False にする。"""
+    返し、minimal=False にする。time_limit・mus_time_limit を省略すると nurse.properties の値（既定は各30秒）を使う。
+    結果のリターンコードは Diagnosis.code（nurse/codes.py）。"""
+    cfg = load_settings()
+    time_limit = cfg.solve_time_limit if time_limit is None else time_limit
+    mus_time_limit = cfg.mus_time_limit if mus_time_limit is None else mus_time_limit
     first = solve(I, eps, time_limit=time_limit)
     times = {"solve": first.times["solve"]}
     state = first.status.exitstatus.name
@@ -176,7 +192,7 @@ def diagnose(I: Instance, eps: Eps, time_limit: float = 30, mus_solver: str = MU
         return Diagnosis(TIMEOUT, f"オフにできない制約だけの充足判定が{time_limit:g}秒で終わらなかった", times=times)
     if verdict == "unsat":                                              # a. 前提同士の矛盾（soft を外す余地がない）
         if not given:
-            raise RuntimeError("背景の制約だけで矛盾している（モデルの不具合）")
+            raise InternalError("背景の制約だけで矛盾している（モデルの不具合）")
         items, minimal = run(given_exprs, background, given)
         times["mus_given"] = time.perf_counter() - t0
         return Diagnosis(CONFLICT, state, items or [], True, times, solver, minimal)

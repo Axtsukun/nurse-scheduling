@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from .instance import Instance
 from .message import Renderer
+from .codes import InputError
 
 SCOPES = ("core", "law", "domain", "optional")
 MANDATORY = ("core", "law")              # オフにできない適用範囲
@@ -83,9 +84,9 @@ def constraint(name: str, layer: str, relaxable: bool = True, scope: str = "opti
     """制約メソッドを登録するデコレータ。メソッドは `list[Expression | Item | Aux]` を返すだけ（副作用なし）。
     補助変数は、そのメソッド内で生成する。"""
     if scope not in SCOPES:
-        raise ValueError(f"scope は {SCOPES} のいずれか: {scope!r}")
+        raise InputError(f"scope は {SCOPES} のいずれか: {scope!r}")
     if name in REGISTRY:
-        raise ValueError(f"制約名が重複: {name!r}")
+        raise InputError(f"制約名が重複: {name!r}")
 
     def deco(fn):
         REGISTRY[name] = ConstraintSpec(name, layer, relaxable, fn.__name__, scope, tuple(source), title)
@@ -98,11 +99,11 @@ def selected_constraints(I: Instance, enabled: set[str] | None = None) -> list[s
     層2・層3は Rules.off に含まれず、かつ enabled（None=全て）に含まれるもの。"""
     bad = [nm for nm in I.rules.off if nm not in REGISTRY or REGISTRY[nm].scope in MANDATORY]
     if bad:
-        raise ValueError(f"Rules.off に指定できない制約: {bad}")
+        raise InputError(f"Rules.off に指定できない制約: {bad}")
     if enabled is not None:
         missing = [nm for nm, sp in REGISTRY.items() if sp.scope in MANDATORY and nm not in enabled]
         if missing:
-            raise ValueError(f"オフにできない制約を外そうとした: {missing}")
+            raise InputError(f"オフにできない制約を外そうとした: {missing}")
     return [nm for nm, sp in REGISTRY.items()
             if sp.scope in MANDATORY or (nm not in I.rules.off and (enabled is None or nm in enabled))]
 

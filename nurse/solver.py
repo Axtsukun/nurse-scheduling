@@ -4,6 +4,7 @@ import time
 from typing import NamedTuple
 import numpy as np
 import cpmpy as cp
+from .config import load_settings
 from .instance import Instance, Eps
 from .model import NurseModel
 
@@ -21,10 +22,13 @@ class SolveResult(NamedTuple):
     counts: dict[str, int]         # 制約群ごとの制約本数
 
 
-def solve(I: Instance, eps: Eps, time_limit: float = 30, workers: int = 8, lin_level: int = 1,
+def solve(I: Instance, eps: Eps, time_limit: float | None = None, workers: int = 8, lin_level: int = 1,
           solver: str = SOLVE_SOLVER, enabled: set[str] | None = None) -> SolveResult:
     """solver: 既定は SOLVE_SOLVER = "ortools"(CP-SAT)。"exact" / "pysat" は実験用。workers・lin_level は ortools のみ。
-    enabled: 有効にする制約名（None=全て）。カーネル・層1は外せない（Rules.off と同じ規則）。"""
+    enabled: 有効にする制約名（None=全て）。カーネル・層1は外せない（Rules.off と同じ規則）。
+    time_limit: 求解の時間制限（秒）。省略すると nurse.properties の solve.time_limit（既定30秒）を使う。"""
+    if time_limit is None:
+        time_limit = load_settings().solve_time_limit
     t0 = time.perf_counter()
     M = NurseModel(I, eps)
     groups = M.build(enabled)

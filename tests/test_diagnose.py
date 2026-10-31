@@ -46,21 +46,21 @@ def _is_sat(hard, soft):
 
 def test_feasible():
     d = m.diagnose(m.synthetic(), m.Eps(), time_limit=30)
-    assert d.status == m.FEASIBLE and not d.items
+    assert d.status == m.FEASIBLE and not d.items and d.code == m.ReturnCode.OK
     assert "矛盾はありません" in d.explain()
 
 
 def test_timeout_is_not_reported_as_conflict():
     """時間切れでは、制約矛盾かどうか不明なので MUS を求めず TIMEOUT を返す"""
     d = m.diagnose(m.synthetic(52, 8, T=31), m.Eps(), time_limit=0.05)
-    assert d.status == m.TIMEOUT and not d.items
+    assert d.status == m.TIMEOUT and not d.items and d.code == m.ReturnCode.SOLVE_TIME_LIMIT
     assert "時間切れ" in d.explain() and "矛盾かどうかは不明" in d.explain()
 
 
 def test_soft_only_conflict_needs_no_given_constraint():
     d = m.diagnose(_inst_offcount(), m.Eps(), time_limit=60)
     assert d.status == m.CONFLICT and not d.hard_only and d.mus_solver == "exact"
-    assert d.groups == ["offcount"] and not d.given_items
+    assert d.groups == ["offcount"] and not d.given_items and d.code == m.ReturnCode.CONFLICT
     assert [x.line for x in d.soft_items] == ["offcount-0001  [公休数一致] N00 公休数=31"]
     text = d.explain()
     assert "制約矛盾" in text and "offcount-0001  [公休数一致] N00 公休数=31" in text and "層2" in text
@@ -120,8 +120,9 @@ def test_solver_choice_is_fixed_cpsat_for_solve_exact_for_mus():
 
 def test_missing_mus_solver_fails_loudly_instead_of_switching():
     """MUS ソルバーが使えないとき、黙って別のソルバーに替えず、導入方法つきのエラーにする"""
-    with pytest.raises(RuntimeError, match="pip install exact"):
+    with pytest.raises(m.SolverUnavailableError, match="pip install exact") as e:       # RuntimeError の一種
         m.diagnose(_inst_offcount(), m.Eps(), time_limit=60, mus_solver="no_such_solver")
+    assert isinstance(e.value, RuntimeError) and m.code_of(e.value) == m.ReturnCode.SOLVER_UNAVAILABLE
 
 
 def test_mus_that_finishes_in_time_is_minimal():
@@ -136,7 +137,7 @@ def test_mus_time_limit_returns_the_precandidate_core_when_the_mus_does_not_fini
     t0 = time.perf_counter()
     d = m.diagnose(I, m.Eps(), time_limit=60, mus_time_limit=3)
     assert time.perf_counter() - t0 < 40                                   # 上限なしなら戻らない条件
-    assert d.status == m.CONFLICT and not d.minimal and d.items
+    assert d.status == m.CONFLICT and not d.minimal and d.items and d.code == m.ReturnCode.CONFLICT_MUS_TIME_LIMIT
     assert "最小でない可能性" in d.explain()
     # 返った制約（ID で引き直す）だけを soft として残しても実行不能（矛盾する集合になっている）
     flat = [x for items in m.NurseModel(I, m.Eps()).build_named().values() for x in items]
@@ -149,5 +150,5 @@ def test_mus_time_limit_returns_the_precandidate_core_when_the_mus_does_not_fini
 def test_mus_time_limit_too_short_to_find_any_core_reports_unidentified_cause():
     """事前候補も時間内に取れなければ、矛盾は確定しているが原因は特定できない（items が空）"""
     d = m.diagnose(_inst_72h_extreme(), m.Eps(), time_limit=60, mus_time_limit=0.001)
-    assert d.status == m.CONFLICT and not d.items and not d.minimal
+    assert d.status == m.CONFLICT and not d.items and not d.minimal and d.code == m.ReturnCode.CONFLICT_UNIDENTIFIED
     assert "特定できませんでした" in d.explain()
