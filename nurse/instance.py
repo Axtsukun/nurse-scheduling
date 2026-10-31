@@ -107,7 +107,7 @@ class Instance:
     n_days: int                            # T
     start_weekday: int                     # 計画日0の曜日（0=月）
     history: np.ndarray                    # [n, H] 前月末の勤務 h_{n,t}（値は 𝒮 の添字）
-    demand: list[list[tuple[int, int, int]]]  # 日 d の需要区間 (a, b, r)：[a,b) に r 人以上
+    demand: list[list[tuple[int, int, int]]]  # 日 d の需要区間（番）(a, b, r)：[a,b) に r 人以上。番ごとに一定で、1日（0〜48）を空きなく覆う。需要なしは r=0
     seniors: list[int]                     # 夜勤リーダー資格者 L ⊆ 𝒩
     leader_cats: tuple[str, ...]           # リーダー必須の区分
     night_cats: tuple[str, ...]            # 夜勤回数に数える区分 𝒦^night
@@ -129,11 +129,26 @@ class Instance:
     cat_names: dict[str, str] = field(default_factory=dict)   # 勤務区分名の上書き（未指定の区分は既定の表）
 
     def __post_init__(self):
+        self._check_demand()
         if self.start_date is not None and self.start_date.weekday() != self.start_weekday:
             raise ValueError(f"start_date {self.start_date} は曜日が start_weekday={self.start_weekday}（0=月）と一致しない"
                              f"（{self.start_date.weekday()}）")
         if self.nurse_names is not None and len(self.nurse_names) != len(self.domain):
             raise ValueError(f"nurse_names の長さ {len(self.nurse_names)} が看護師数 {len(self.domain)} と違う")
+
+    def _check_demand(self) -> None:
+        """需要は番（需要区間）ごとに一定の人数で、各日を 0〜DAY の間、空きなく重なりなく覆う（需要なしは r=0 で明示）"""
+        if len(self.demand) != self.n_days:
+            raise ValueError(f"demand の日数 {len(self.demand)} が n_days={self.n_days} と違う")
+        for d, bands in enumerate(self.demand):
+            pos = 0
+            for a, b, r in sorted(bands):
+                if a != pos or not a < b or r < 0:
+                    raise ValueError(f"demand[{d}] は 0〜{DAY} を空きなく重なりなく覆う区間（a<b, r>=0）でなければならない: "
+                                     f"{sorted(bands)}（{pos} の位置で不正: ({a}, {b}, {r})）")
+                pos = b
+            if pos != DAY:
+                raise ValueError(f"demand[{d}] が {DAY} まで覆っていない（{pos} で終わる）。需要なしの時間帯は r=0 で明示する")
 
     # 層パラメータへの委譲（制約・検証器・テストはこの名前で参照する）
     min_rest = _delegate("guideline", "min_rest")

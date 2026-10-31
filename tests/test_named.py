@@ -127,7 +127,7 @@ def test_messages_of_remaining_groups():
 
 def test_cover_message_shows_the_base_interval_and_ends_at_next_day_midnight():
     """人数制約のメッセージは、実際に効いている基本区間（人数を数える小区間）と勤務者数だけで表す。
-    需要区間は出さない。17:30〜24:00 は翌日の 00:00 で終わる"""
+    需要区間は出さない。統合しないので、文面は制約ごとに異なる。17:30〜24:00 は翌日の 00:00 で終わる"""
     named = m.NurseModel(m.synthetic(start_date=START), m.Eps()).build_named()
     day0 = [x.message for x in named["cover"] if x.message.startswith("11/02")]
     assert "11/02 12:30 - 11/02 13:00 勤務者数=10" in day0
