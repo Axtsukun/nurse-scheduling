@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 from .instance import (Instance, DAY, WEEK, FOUR_WEEKS, HOLIDAY_WEEKLY, HOLIDAY_4W4D,
-                       inclusion_threshold)
+                       Eps, inclusion_threshold)
 from .codes import InputError
 
 
@@ -106,9 +106,9 @@ def cover_spans(I: Instance, d: int) -> list[tuple[frozenset, int, int, int]]:
     W = [s for s, sd in enumerate(I.shifts) if sd.is_work]
     segs = [(off, s, I.shifts[s].start + off * DAY, I.shifts[s].end + off * DAY)
             for off in (-1, 0) for s in W]
-    bps = {0, DAY} | {a for a, _, _ in I.demand[d]} | {b for _, b, _ in I.demand[d]}
-    bps |= {p for _, _, a, b in segs for p in (a, b) if 0 < p < DAY}
-    bps = sorted(bps)
+    bp_set = {0, DAY} | {a for a, _, _ in I.demand[d]} | {b for _, b, _ in I.demand[d]}
+    bp_set |= {p for _, _, a, b in segs for p in (a, b) if 0 < p < DAY}
+    bps = sorted(bp_set)
     req = lambda t: next((r for a, b, r in I.demand[d] if a <= t < b), 0)     # 需要区間は重ならない（Instance が検査）
     base = []
     for a, b in zip(bps, bps[1:]):
@@ -145,7 +145,7 @@ def symmetry_classes(I: Instance, mode: str) -> list[list[int]]:
         同値類（看護師の添字のリスト）のリスト。大きさ 2 以上のものだけ。"""
     groups: dict[tuple, list[int]] = {}
     for n in range(I.n_nurses):
-        key = (tuple(I.domain[n]), I.off_days[n], n in I.seniors, n in I.night_only, inclusion_threshold(I, n))
+        key: tuple = (tuple(I.domain[n]), I.off_days[n], n in I.seniors, n in I.night_only, inclusion_threshold(I, n))
         if mode == "exact":
             key += (tuple(int(v) for v in I.history[n]),
                     tuple(sorted((d, s) for (m, d), s in I.fixed.items() if m == n)),
@@ -154,7 +154,7 @@ def symmetry_classes(I: Instance, mode: str) -> list[list[int]]:
     return [g for g in groups.values() if len(g) >= 2]
 
 
-def precheck(I: Instance, eps=None) -> list[str]:
+def precheck(I: Instance, eps: Eps | None = None) -> list[str]:
     """L0: 必要条件の集計検査（区間ごとに、覆える値を持ち当日が固定休でない人数 ≥ r_j）。eps は互換のため受け取る
 
     Args:

@@ -3,10 +3,13 @@
 層1〜3の制約は、このクラスを継承したミックスイン（law.py / domain.py / optional.py）に定義する。
 """
 from __future__ import annotations
+from collections.abc import Collection, Iterable
 import cpmpy as cp
+from cpmpy.expressions.core import Expression
+from cpmpy.expressions.variables import NDVarArray
 from .instance import Instance, Eps, OFF_NAME
 from .message import Nurse, Day, Shift, Param
-from .registry import REGISTRY, ConstraintSpec, Item, Aux, Named, constraint, selected_constraints
+from .registry import REGISTRY, ConstraintSpec, Item, Aux, Named, Constraints, ConstraintList, constraint, selected_constraints
 
 
 class ModelKernel:
@@ -19,7 +22,7 @@ class ModelKernel:
     - `self.dom[n]` … D_n（昇順リスト）
     - `self.active` … `build()` で有効になった制約名（他の制約の前提を確かめるために使う）"""
 
-    def __init__(self, I: Instance, eps: Eps):
+    def __init__(self, I: Instance, eps: Eps) -> None:
         """決定変数 `x` を看護師ごとに作る（取れる値の集合 D_n だけの疎な形）。
 
         Args:
@@ -52,7 +55,7 @@ class ModelKernel:
             時点 t = H + d（H は履歴の日数）。"""
         return self.H + d
 
-    def x(self, n: int, t: int, s: int):
+    def x(self, n: int, t: int, s: int) -> Expression | None:
         """x[n,t,s]。s ∉ D_n なら None（その値は取れない）
 
         Args:
@@ -65,7 +68,7 @@ class ModelKernel:
         j = self.col[n].get(s)
         return None if j is None else self.xv[n][t, j]
 
-    def xs(self, n: int, t: int, ss) -> list:
+    def xs(self, n: int, t: int, ss: Iterable[int]) -> list[Expression]:
         """{x[n,t,s] : s ∈ ss ∩ D_n}
 
         Args:
@@ -77,7 +80,7 @@ class ModelKernel:
             `x[n,t,s]` のリスト（D_n に無い s は除く）。"""
         return [v for s in ss if (v := self.x(n, t, s)) is not None]
 
-    def work(self, n: int, t: int):
+    def work(self, n: int, t: int) -> Expression:
         """w[n,t] = Σ_{s: work_s} x[n,t,s]（ExactlyOne により 0/1。変数ではなく式。同じ (n,t) は使い回す）
 
         Args:
@@ -91,7 +94,7 @@ class ModelKernel:
             self._work[key] = cp.sum(self.xs(n, t, [s for s in self.dom[n] if self.I.shifts[s].is_work]))
         return self._work[key]
 
-    def wvec(self, n: int):
+    def wvec(self, n: int) -> NDVarArray:
         """w[n,·] を時点順に並べた CPMpy 式配列（長さ H+T。スライスして cp.sum に渡す）
 
         Args:
@@ -101,7 +104,7 @@ class ModelKernel:
             `w[n,·]` を時点順に並べた CPMpy の式配列（長さ H+T）。"""
         return cp.cpm_array([self.work(n, t) for t in range(self.H + self.T)])
 
-    def cat(self, n: int, t: int, ks) -> list:
+    def cat(self, n: int, t: int, ks: Collection[str]) -> list[Expression]:
         """{x[n,t,s] : k(s) ∈ ks}
 
         Args:
@@ -113,7 +116,7 @@ class ModelKernel:
             区分が `ks` に入る勤務の `x[n,t,s]` のリスト。"""
         return self.xs(n, t, [s for s in self.dom[n] if self.I.shifts[s].cat in ks])
 
-    def night_count(self, n: int):
+    def night_count(self, n: int) -> Expression:
         """c[n] = Σ_d Σ_{k(s)∈𝒦^night} x[n,H+d,s]（夜勤回数の式）
 
         Args:
@@ -148,7 +151,7 @@ class ModelKernel:
         return {nm: [self._named(REGISTRY[nm], i, c)
                      for i, c in enumerate(getattr(self, REGISTRY[nm].method)())] for nm in names}
 
-    def _named(self, spec: ConstraintSpec, i: int, c) -> Named:
+    def _named(self, spec: ConstraintSpec, i: int, c: Expression | Item | Aux) -> Named:
         """制約メソッドの戻り値の1要素を Named にする（i は群内の0始まりの位置）。
         hard = relaxable=False の群、または Aux（補助変数の定義）。メッセージはここでは作らない（Named.message が遅延生成）
 
@@ -178,21 +181,30 @@ class ModelKernel:
 
     # ---- カーネルの構造制約（常に有効） ----
     @constraint("struct", "L1", relaxable=False, scope="core", title="勤務一意")
-    def c_struct(self):
-        """Σ_{s∈D_n} x[n,t,s] = 1（ExactlyOne）"""
+    def c_struct(self) -> Constraints:
+        """Σ_{s∈D_n} x[n,t,s] = 1（ExactlyOne）
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         return [c for n in self.N for c in (self.xv[n].sum(axis=1) == 1)]
 
     @constraint("history", "L1", relaxable=False, scope="core", title="履歴固定")
-    def c_history(self):
-        """x[n,t,h_{n,t}] = 1（t < H, 前月末の実績）"""
+    def c_history(self) -> Constraints:
+        """x[n,t,h_{n,t}] = 1（t < H, 前月末の実績）
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         return [self.x(n, t, int(self.I.history[n, t])) == 1
                 for n in self.N for t in range(self.H)]
 
     @constraint("fixed", "L3", scope="core", source=("LAW-PAID-LEAVE",), title="固定割当")
-    def c_fixed(self):
-        """固定割当 x[n,H+d,s] = 1。fixed_only の値は固定日以外で x = 0（この側は定義的なので Aux）"""
+    def c_fixed(self) -> Constraints:
+        """固定割当 x[n,H+d,s] = 1。fixed_only の値は固定日以外で x = 0（この側は定義的なので Aux）
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         I = self.I
-        out = [Item(self.x(n, self.t(d), s) == 1, (Nurse(n), Day(d)), (Param("勤務", Shift(s)),))
+        out: ConstraintList = [Item(self.x(n, self.t(d), s) == 1, (Nurse(n), Day(d)), (Param("勤務", Shift(s)),))
                for (n, d), s in sorted(I.fixed.items())]               # 看護師・日付順（説明が読みやすい）
         for n in self.N:
             for s in self.dom[n]:

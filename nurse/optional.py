@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import cpmpy as cp
 from .kernel import ModelKernel
-from .registry import constraint, Item, Aux
+from .registry import constraint, Item, Aux, Constraints, ConstraintList
 from .instance import DAY, is_part, night_band, night_capable, weekend_days, weekend_pairs
 from .message import Nurse, Day, DaySpan, Clock, Param
 from .preprocess import rest_cliques, symmetry_classes
@@ -14,8 +14,11 @@ class OptionalConstraints(ModelKernel):
     # ---- 系列（ガイドライン） ----
     """層3（optional）の制約。努力義務・ガイドライン・個別要望。`Rules.off` でオフにできる。`ModelKernel` を継承したミックスイン。"""
     @constraint("rest", "L2", scope="optional", source=("GL-INTERVAL-LAW", "GL-REST-11H"), title="勤務間隔下限")
-    def c_rest(self):
-        """勤務間隔 ρ（閾値分解）: Σ_{a∈A_θ} x[n,t,a] + Σ_{b∈B_θ} x[n,t+1,b] ≤ 1"""
+    def c_rest(self) -> Constraints:
+        """勤務間隔 ρ（閾値分解）: Σ_{a∈A_θ} x[n,t,a] + Σ_{b∈B_θ} x[n,t+1,b] ≤ 1
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         out, cl = [], rest_cliques(self.I)
         for n in self.N:
             for t in range(self.H - 1, self.H + self.T - 1):
@@ -42,10 +45,13 @@ class OptionalConstraints(ModelKernel):
                 Param("翌日始業", Clock(theta + I.min_rest - DAY), op="<"))
 
     @constraint("consec", "L2", scope="optional", source=("GL-CONSEC-WORK",), title="連続勤務日数上限")
-    def c_consec(self):
-        """連続勤務 ≤ K: Σ_{u=t}^{t+K} w[n,u] ≤ K（計画日を含む窓）"""
+    def c_consec(self) -> Constraints:
+        """連続勤務 ≤ K: Σ_{u=t}^{t+K} w[n,u] ≤ K（計画日を含む窓）
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         K = self.I.max_consec_work
-        out = []
+        out: ConstraintList = []
         for n in self.N:
             w = self.wvec(n)
             out += [Item(cp.sum(w[t:t + K + 1]) <= K,
@@ -54,8 +60,11 @@ class OptionalConstraints(ModelKernel):
         return out
 
     @constraint("offblock", "L2", scope="optional", title="休み連続日数下限")
-    def c_offblock(self):
-        """非勤務ブロック長 ≥ m: w[n,t−1] + Σ_{u=t}^{t+j−1}(1−w[n,u]) + w[n,t+j] ≤ j+1（j<m）"""
+    def c_offblock(self) -> Constraints:
+        """非勤務ブロック長 ≥ m: w[n,t−1] + Σ_{u=t}^{t+j−1}(1−w[n,u]) + w[n,t+j] ≤ j+1（j<m）
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         m, out = self.I.min_off_block, []
         for n in self.N:
             w = self.wvec(n)
@@ -68,10 +77,13 @@ class OptionalConstraints(ModelKernel):
 
     # ---- 個人の回数・週末 ----
     @constraint("weekend", "L3", scope="optional", source=("GL-WEEKEND",), title="勤務週末数上限")
-    def c_weekend(self):
+    def c_weekend(self) -> Constraints:
         """勤務週末数 ≤ W。週末 = (土曜, 日曜) の組（weekend_pairs）。
-        補助 wk[n,d] = w[n,土] ∨ w[n,日]（識別子 wk。両側で定義し、和が数えられるようにする）"""
-        out = []
+        補助 wk[n,d] = w[n,土] ∨ w[n,日]（識別子 wk。両側で定義し、和が数えられるようにする）
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
+        out: ConstraintList = []
         for n in self.N:
             wks = []
             for sat, sun in weekend_pairs(self.I):
@@ -86,11 +98,14 @@ class OptionalConstraints(ModelKernel):
 
     # ---- ε制約 ----
     @constraint("night_band", "EPS", scope="optional", source=("GL-NIGHT-COUNT",), title="夜勤回数範囲")
-    def c_night_band(self):
+    def c_night_band(self) -> Constraints:
         """⌊avg⌋−δ ≤ c[n] ≤ ⌈avg⌉+δ（c[n] は夜勤回数。夜勤可能・非専従者）。
-        注意: 72h の算入判定の界はこの帯を前提にする（domain._night_hour_bounds が is_active で確認）。"""
+        注意: 72h の算入判定の界はこの帯を前提にする（domain._night_hour_bounds が is_active で確認）。
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         lo, hi = night_band(self.I, self.eps)
-        out = []
+        out: ConstraintList = []
         for n in self.N:
             if not night_capable(self.I, n) or n in self.I.night_only:
                 continue
@@ -100,11 +115,15 @@ class OptionalConstraints(ModelKernel):
         return out
 
     @constraint("weekend_spread", "EPS", scope="optional", title="土日勤務日数差上限")
-    def c_weekend_spread(self):
+    def c_weekend_spread(self) -> Constraints:
         """土日勤務日数 e_n = Σ_{d∈土日} w[n,H+d] について、区分 g(正規/パート)ごとに
         max_n e_n − min_n e_n ≤ Δ_g ⇔ ある窓下端 m_g があって m_g ≤ e_n ≤ m_g + Δ_g（n ∈ g）。
         m_g = Σ_k k·p[g,k]（p[g,·] は one-hot の Boolean。cp.intvar は使わない）。
-        制約本数は全ペア方式の O(|g|²) に対し O(|g|)。識別子 p[g,k] → `p`"""
+        制約本数は全ペア方式の O(|g|²) に対し O(|g|)。識別子 p[g,k] → `p`
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
+        out: ConstraintList
         I, out = self.I, []
         sat, sun = weekend_days(I)
         E = len(sat) + len(sun)
@@ -123,13 +142,16 @@ class OptionalConstraints(ModelKernel):
         return out
 
     @constraint("sym_break", "SYM", scope="optional", title="夜勤回数整列")
-    def c_sym_break(self):
+    def c_sym_break(self) -> Constraints:
         """同種の看護師 n_1 < n_2 < … の夜勤回数を非増加に並べる: c[n_i] ≥ c[n_{i+1}]。
         夜勤できない集団（パート等）は対象外。eps.symmetry_break == "" なら制約なし。
-        "exact" のみ健全、"relaxed" は不完全（symmetry_classes 参照。実験用）"""
+        "exact" のみ健全、"relaxed" は不完全（symmetry_classes 参照。実験用）
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         if not self.eps.symmetry_break:
             return []
-        out = []
+        out: ConstraintList = []
         for g in symmetry_classes(self.I, self.eps.symmetry_break):
             g = [n for n in g if night_capable(self.I, n) and n not in self.I.night_only]
             cs = [self.night_count(n) for n in g]
@@ -139,8 +161,11 @@ class OptionalConstraints(ModelKernel):
 
     # ---- 個別要望（ε制約） ----
     @constraint("req_off", "EPS", scope="optional", title="休み要望違反数上限")
-    def c_req_off(self):
-        """休み要望: Σ_{(n,d)∈Q^off} (1 − x[n,H+d,休]) ≤ ⌊ρ·|Q^off|⌋（ρ = eps.req_viol_ratio）"""
+    def c_req_off(self) -> Constraints:
+        """休み要望: Σ_{(n,d)∈Q^off} (1 − x[n,H+d,休]) ≤ ⌊ρ·|Q^off|⌋（ρ = eps.req_viol_ratio）
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         cells = [(n, d) for n, ds in self.I.req_off.items() for d in ds]
         if not cells:
             return []
@@ -149,8 +174,11 @@ class OptionalConstraints(ModelKernel):
                      (), (Param("要望数", len(cells)), Param("違反数", cap)))]
 
     @constraint("req_shift", "EPS", scope="optional", title="シフト要望違反数上限")
-    def c_req_shift(self):
-        """シフト要望: Σ_{(n,d,s)∈Q^shift} (1 − x[n,H+d,s]) ≤ ⌊ρ·|Q^shift|⌋"""
+    def c_req_shift(self) -> Constraints:
+        """シフト要望: Σ_{(n,d,s)∈Q^shift} (1 − x[n,H+d,s]) ≤ ⌊ρ·|Q^shift|⌋
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         cells = [(n, d, s) for n, ds in self.I.req_shift.items() for d, s in ds]
         if not cells:
             return []
@@ -159,8 +187,11 @@ class OptionalConstraints(ModelKernel):
                      (), (Param("要望数", len(cells)), Param("違反数", cap)))]
 
     @constraint("soft_off", "EPS", scope="optional", title="希望休違反数上限")
-    def c_soft_off(self):
-        """希望休: Σ_n Σ_{d∈R_n} (1 − x[n,H+d,休]) ≤ κ（κ = eps.soft_off_viol）"""
+    def c_soft_off(self) -> Constraints:
+        """希望休: Σ_n Σ_{d∈R_n} (1 − x[n,H+d,休]) ≤ κ（κ = eps.soft_off_viol）
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         viol = [1 - self.x(n, self.t(d), self.OFF) for n, ds in self.I.soft_off.items() for d in ds]
         return [Item(cp.sum(viol) <= self.eps.soft_off_viol,
                      (), (Param("要望数", len(viol)), Param("違反数", self.eps.soft_off_viol)))] if viol else []

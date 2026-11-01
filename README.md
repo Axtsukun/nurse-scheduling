@@ -33,7 +33,7 @@ pip install -r requirements.txt                        # cpmpy, ortools, exact, 
 
 python nurse_csp.py            # 合成インスタンス（30人・30日）を1問求解し、勤務表の先頭を表示
 python evaluate.py             # 求解 → 独立検証 → 評価（人数・勤務回数・72時間・土日・要望）を表示
-pytest -q                      # 全テスト（121件、約1分40秒）
+pytest -q                      # 全テスト（122件、約1分40秒）
 ```
 
 どちらのスクリプトも `--lin`（`linearization_level`）と `--time-limit` を取る。`evaluate.py --requests 0.10` で個別要望を全セルの1割だけ加える。
@@ -82,7 +82,7 @@ nurse-scheduling/
 │   ├── test_named.py       制約の名前（ID・クラス名・メッセージ・遅延生成・全群の一覧）  16件
 │   ├── test_message.py     整形器（日付・時刻・範囲・名前・パラメータ）と表示方針の検査  11件
 │   ├── test_solve.py       求解 + 独立検証（制約を1つずつ外す求解を含む）           7件
-│   ├── test_docs.py        README の依存表・依存図とクラス図が、コードと一致すること・ドキュメントサイトがビルドできること・API 文書が全モジュールを載せ docstring が揃い読みやすいこと  9件
+│   ├── test_docs.py        README の依存表・依存図とクラス図が、コードと一致すること・ドキュメントサイトがビルドできること・API 文書が全モジュールを載せ docstring・型ヒントが揃い読みやすいこと  10件
 │   ├── test_config.py      設定ファイル（properties）とリターンコード・例外・CLI の終了コード  17件
 │   ├── test_diagnose.py    診断（時間切れ / 制約矛盾 / 前提同士の矛盾 / MUS が極小 / MUS の時間制限）  13件
 │   └── test_evaluate.py    評価の集計が解と整合すること                              3件
@@ -298,7 +298,7 @@ Mermaid には UML のパッケージ図がないので、flowchart で UML の�
 | 2 | `preprocess` | 時刻データから係数・集合・窓を作る純Python | `codes`, `instance` | — |
 | 2 | `solution` | 解（割当表）の読み取り部品 | `instance` | — |
 | 2 | `synthetic` | 合成インスタンス・個別要望の付与 | `instance` | numpy |
-| 3 | `registry` | `@constraint` の登録、名前つき制約（`Item`・`Aux`・`Named`）、有効な制約の選択 | `codes`, `instance`, `message` | — |
+| 3 | `registry` | `@constraint` の登録、名前つき制約（`Item`・`Aux`・`Named`）、有効な制約の選択 | `codes`, `instance`, `message` | cpmpy |
 | 4 | `kernel` | 決定変数 `x` と式の部品、構造制約（`ModelKernel`） | `instance`, `message`, `registry` | cpmpy |
 | 5 | `domain` | 層2 病院・看護職共通の制約（`DomainConstraints`） | `instance`, `kernel`, `message`, `preprocess`, `registry` | cpmpy |
 | 5 | `law` | 層1 労働法規の制約（`LawConstraints`） | `codes`, `kernel`, `message`, `preprocess`, `registry` | cpmpy |
@@ -483,7 +483,7 @@ MUS の求め方:
 
 README と `docs/design/`・`docs/legal/`、および **Python の API リファレンス**（`docs/api/`）を、MkDocs（Material テーマ）で1つのサイトにする。API リファレンスはソースの docstring から自動生成する（`mkdocstrings`。ソースを実行せず構文解析で読むので、cpmpy 等を入れなくてもビルドできる）。**docstring の書き方**（Markdown として表示される）:
 
-- 先頭に「何をするか」を1行で書く。**引数がある関数は `Args:`、値を返す関数は `Returns:` の節**を、公開・内部（`_` で始まる）を問わず書く（Google 形式。API 文書で表になる。`property` は対象外。`tests/test_docs.py` が検査する）。型注釈の無い関数は、型の欄が空になる（警告は出さない設定）。
+- 先頭に「何をするか」を1行で書く。**引数がある関数は `Args:`、値を返す関数は `Returns:` の節**を、公開・内部（`_` で始まる）を問わず書く（Google 形式。API 文書で表になる。`property` は対象外。`tests/test_docs.py` が検査する）。型は、署名の型ヒントから表の「タイプ」欄に出る。
 - 箇条書き・番号リスト・表・コードブロックの前には**空行**を入れる（無いと直前の段落に連結して1行に潰れる。`tests/test_docs.py` が検出する）。入れ子の箇条書きは4字下げる。
 - `A[n][d]` のような角括弧を含む記号は、バッククォートで囲む（囲まないと相互参照とみなされ、`--strict` が失敗する）。
 - クラスの項目（dataclass・NamedTuple・Enum）の説明は、項目の行末コメント `x: int  # 説明` に書く（`tools/griffe_comments.py` が API 文書の項目説明として表示する）。本文は今の Markdown をそのまま使い、サイト用の複製はない（README は `tools/mkdocs_hooks.py` がトップページとして組み込む）。作業メモ（`docs/notes/`）は載せない。
@@ -520,7 +520,7 @@ mkdocs build --strict         # _site/ に出力。警告があれば失敗す�
 | `test_solve.py` | 7 | する | 可解性と独立検証（`lin` 0/1）、層2・層3を1つずつ外した求解、休日の各規則、検証器が違反を検出すること |
 | `test_named.py` | 16 | しない | `build` と `build_named` が同じ式、全群の短い一意なクラス名、**ID が全制約で一意・群内で連続**、補助変数・背景はメッセージなし、全 soft 制約のメッセージ、**メッセージの遅延生成**、全群のメッセージの一覧（開始日あり・なし）、人数制約が基本区間・翌日 00:00 で表れること、仕様書 8 節の表が実装の出力と一致すること |
 | `test_message.py` | 11 | しない | 整形器: 日付（月・年またぎ、履歴の日）、時刻のゼロ埋め・翌日表記、時間帯の 24:00 → 翌日 00:00、看護師名・区分名、パラメータの書式、開始日と曜日の整合検査 |
-| `test_docs.py` | 9 | しない | README 3.4 の依存表・依存図が実際の `import` と一致し循環がないこと、`class-diagram.md` のクラス図のフィールド・操作・戻り値・列挙値がコードと一致すること、ドキュメントサイトが警告なしでビルドでき図がすべて出力されること（MkDocs が無ければスキップ）、`docs/api/` が全モジュールを載せ nav に入っていること、公開の関数・クラスの docstring があること、全関数が `Args:`・`Returns:` を持つこと、Markdown の崩れ（リスト・表の前の空行なし）が無いこと |
+| `test_docs.py` | 10 | しない | README 3.4 の依存表・依存図が実際の `import` と一致し循環がないこと、`class-diagram.md` のクラス図のフィールド・操作・戻り値・列挙値がコードと一致すること、ドキュメントサイトが警告なしでビルドでき図がすべて出力されること（MkDocs が無ければスキップ）、`docs/api/` が全モジュールを載せ nav に入っていること、公開の関数・クラスの docstring があること、全関数が `Args:`・`Returns:` を持つこと、全関数に型ヒントがあること、Markdown の崩れ（リスト・表の前の空行なし）が無いこと |
 | `test_config.py` | 17 | 一部 | properties の書式と不正（行番号つき）・読み込みの優先順位、時間制限が設定ファイルで変わること、リターンコード全種と例外の対応、CLI の終了コード |
 | `test_diagnose.py` | 13 | する | 時間切れは矛盾と区別、soft 単独の矛盾 / 前提に依存する矛盾 / **前提同士の矛盾**を日本語で説明、**MUS が充足不能かつ極小**（1件外せば解ける）、ソルバー選択（求解 CP-SAT・MUS exact）の固定、MUS ソルバー未導入時にエラーになること、**MUS の時間制限**（時間内に終われば最小 / 終わらなければ事前候補を返す / 事前候補も取れなければ特定不能） |
 | `test_evaluate.py` | 3 | する | 評価の集計が解と整合、土日勤務日数のばらつき上限 |
@@ -552,6 +552,7 @@ mkdocs build --strict         # _site/ に出力。警告があれば失敗す�
 - **勤務の値はデータ**（`ShiftDef`）。禁止遷移・人数・夜勤時間はすべて時刻から生成し、勤務名をコードに直書きしない（`"休"` のみ例外）。
 - **x は疎**。看護師が取れる値についてだけ変数を作る。
 - **制約は1定義＝1メソッド**で、副作用なし。
+- **型ヒントは必須**。製品コード・ツール・テストの全関数で、`self` / `cls` 以外のすべての引数と戻り値に型を付ける（入れ子の関数も。`lambda` を除く）。制約メソッドの戻り値は `Constraints`（`nurse/registry.py`）。`tests/test_docs.py` が検査する。型の整合性は `mypy` で確かめられる（検査には使っていない。製品コードに4件の指摘が残る。9 章）。
 - **診断は別モデル**。通常の求解に指示変数を入れない。
 - **週パターンの列挙は採用しない**（規模が約100倍になり、CSP ではLP緩和の利点が活きない）。
 
@@ -559,6 +560,7 @@ mkdocs build --strict         # _site/ に出力。警告があれば失敗す�
 
 ## 9. 既知の制限
 
+- **型の整合性（`mypy`）で製品コードに4件の指摘が残っています**（`mypy nurse verify.py evaluate.py nurse_csp.py tools --ignore-missing-imports`。cpmpy は型情報を持たないため、式は `Expression` として扱う）。`nurse/optional.py` の `1 - self.x(…, 休)` が3件（`x` は値が取れないとき `None` を返しうるが、「休」は必ず取れる前提で書いてある）、`nurse/diagnosis.py` の `involved` が1件（`None` と空リストの扱い）。型ヒントだけでは直せず、コードの変更になる。検査（CI）には入れていない。
 - **合成データでの検証が中心です**。需要・確定休・履歴は乱数と手作りの値で、実在の病棟ではありません。
 - **`night_band` をオフにすると求解が大幅に遅くなります**（72時間ルールの補助変数が全員分になる。30人・30日で 1.7秒 → 33秒、別の回は120秒でも未解決）。72時間ルールの界が `night_band` を前提にしているため、その前提が無いときは健全な式（補助変数が増える）を使う。
 - **求解時間は規模より日数と72時間ルールで決まります**。同じ人数でも日数が1日増えると数倍になる条件がある。ワーカー数は複数並列で動くため、同じ条件でも試行ごとにばらつく。
