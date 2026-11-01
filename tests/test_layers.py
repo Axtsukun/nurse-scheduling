@@ -144,3 +144,14 @@ def test_weekend_pairs_and_shared_solution_helpers() -> None:
     assert all(sun < J.n_days for _, sun in m.weekend_pairs(J))
     K = dc.replace(m.synthetic(T=28), start_weekday=6)             # 計画日0=日 → 最終日27=土 は日曜が計画外で数えない
     assert 27 not in [sat for sat, _ in m.weekend_pairs(K)]
+
+
+def test_request_for_a_shift_the_nurse_cannot_take_is_an_input_error() -> None:
+    """個別要望が、その看護師の取れない勤務（取れる値の集合の外）を指すとき、`TypeError`（内部エラー）ではなく、
+    原因の分かる InputError にする。"""
+    I = m.synthetic()
+    n = next(n for n in range(I.n_nurses) if m.is_part(I, n))
+    s = next(s for s in range(len(I.shifts)) if s not in I.domain[n])
+    J = dc.replace(I, req_shift={n: [(3, s)]})
+    with pytest.raises(m.InputError, match=f"看護師 {n} は勤務 '{I.shifts[s].name}' を取れない"):
+        m.NurseModel(J, m.Eps()).build()

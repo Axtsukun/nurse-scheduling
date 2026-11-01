@@ -33,7 +33,7 @@ pip install -r requirements.txt                        # cpmpy, ortools, exact, 
 
 python nurse_csp.py            # 合成インスタンス（30人・30日）を1問求解し、勤務表の先頭を表示
 python evaluate.py             # 求解 → 独立検証 → 評価（人数・勤務回数・72時間・土日・要望）を表示
-pytest -q                      # 全テスト（122件、約1分40秒）
+pytest -q                      # 全テスト（123件、約1分40秒）
 ```
 
 どちらのスクリプトも `--lin`（`linearization_level`）と `--time-limit` を取る。`evaluate.py --requests 0.10` で個別要望を全セルの1割だけ加える。
@@ -78,7 +78,7 @@ nurse-scheduling/
 │
 ├── tests/
 │   ├── test_preprocess.py  前処理の厳密性（総当たりと照合。ソルバー不要）        6件
-│   ├── test_layers.py      層構成・根拠ID・休日の窓・検査関数の対応・パラメータ検証  39件
+│   ├── test_layers.py      層構成・根拠ID・休日の窓・検査関数の対応・パラメータ検証・取れない勤務への要望の検出  40件
 │   ├── test_named.py       制約の名前（ID・クラス名・メッセージ・遅延生成・全群の一覧）  16件
 │   ├── test_message.py     整形器（日付・時刻・範囲・名前・パラメータ）と表示方針の検査  11件
 │   ├── test_solve.py       求解 + 独立検証（制約を1つずつ外す求解を含む）           7件
@@ -299,7 +299,7 @@ Mermaid には UML のパッケージ図がないので、flowchart で UML の�
 | 2 | `solution` | 解（割当表）の読み取り部品 | `instance` | — |
 | 2 | `synthetic` | 合成インスタンス・個別要望の付与 | `instance` | numpy |
 | 3 | `registry` | `@constraint` の登録、名前つき制約（`Item`・`Aux`・`Named`）、有効な制約の選択 | `codes`, `instance`, `message` | cpmpy |
-| 4 | `kernel` | 決定変数 `x` と式の部品、構造制約（`ModelKernel`） | `instance`, `message`, `registry` | cpmpy |
+| 4 | `kernel` | 決定変数 `x` と式の部品、構造制約（`ModelKernel`） | `codes`, `instance`, `message`, `registry` | cpmpy |
 | 5 | `domain` | 層2 病院・看護職共通の制約（`DomainConstraints`） | `instance`, `kernel`, `message`, `preprocess`, `registry` | cpmpy |
 | 5 | `law` | 層1 労働法規の制約（`LawConstraints`） | `codes`, `kernel`, `message`, `preprocess`, `registry` | cpmpy |
 | 5 | `optional` | 層3 努力義務・要望の制約（`OptionalConstraints`） | `instance`, `kernel`, `message`, `preprocess`, `registry` | cpmpy |
@@ -516,7 +516,7 @@ mkdocs build --strict         # _site/ に出力。警告があれば失敗す�
 | ファイル | 件数 | 求解 | 見ているもの |
 |---|---|---|---|
 | `test_preprocess.py` | 6 | しない | 夜勤時間の係数、勤務間隔の閾値分解、人数制約の区間化が総当たりと完全一致。人数制約の区間が基本区間で重ならないこと、需要の入力検査 |
-| `test_layers.py` | 39 | 一部 | 登録した制約と `constraints.yaml` の整合、オフにできない制約の保護、算入閾値、休日の窓（曜日7通り×起算2通り×日数2通り）、パラメータ検証、検査関数の対応、`night_band` オフ時の界、`SolveResult`、週末の定義 |
+| `test_layers.py` | 40 | 一部 | 登録した制約と `constraints.yaml` の整合、オフにできない制約の保護、算入閾値、休日の窓（曜日7通り×起算2通り×日数2通り）、パラメータ検証、検査関数の対応、`night_band` オフ時の界、`SolveResult`、週末の定義、取れない勤務への要望が `InputError` になること |
 | `test_solve.py` | 7 | する | 可解性と独立検証（`lin` 0/1）、層2・層3を1つずつ外した求解、休日の各規則、検証器が違反を検出すること |
 | `test_named.py` | 16 | しない | `build` と `build_named` が同じ式、全群の短い一意なクラス名、**ID が全制約で一意・群内で連続**、補助変数・背景はメッセージなし、全 soft 制約のメッセージ、**メッセージの遅延生成**、全群のメッセージの一覧（開始日あり・なし）、人数制約が基本区間・翌日 00:00 で表れること、仕様書 8 節の表が実装の出力と一致すること |
 | `test_message.py` | 11 | しない | 整形器: 日付（月・年またぎ、履歴の日）、時刻のゼロ埋め・翌日表記、時間帯の 24:00 → 翌日 00:00、看護師名・区分名、パラメータの書式、開始日と曜日の整合検査 |
@@ -552,7 +552,7 @@ mkdocs build --strict         # _site/ に出力。警告があれば失敗す�
 - **勤務の値はデータ**（`ShiftDef`）。禁止遷移・人数・夜勤時間はすべて時刻から生成し、勤務名をコードに直書きしない（`"休"` のみ例外）。
 - **x は疎**。看護師が取れる値についてだけ変数を作る。
 - **制約は1定義＝1メソッド**で、副作用なし。
-- **型ヒントは必須**。製品コード・ツール・テストの全関数で、`self` / `cls` 以外のすべての引数と戻り値に型を付ける（入れ子の関数も。`lambda` を除く）。制約メソッドの戻り値は `Constraints`（`nurse/registry.py`）。`tests/test_docs.py` が検査する。型の整合性は `mypy` で確かめられる（検査には使っていない。製品コードに4件の指摘が残る。9 章）。
+- **型ヒントは必須**。製品コード・ツール・テストの全関数で、`self` / `cls` 以外のすべての引数と戻り値に型を付ける（入れ子の関数も。`lambda` を除く）。制約メソッドの戻り値は `Constraints`（`nurse/registry.py`）。`tests/test_docs.py` が検査する。型の整合性は `mypy` で確かめられる（検査には使っていない。製品コードの指摘は0件。9 章）。
 - **診断は別モデル**。通常の求解に指示変数を入れない。
 - **週パターンの列挙は採用しない**（規模が約100倍になり、CSP ではLP緩和の利点が活きない）。
 
@@ -560,7 +560,7 @@ mkdocs build --strict         # _site/ に出力。警告があれば失敗す�
 
 ## 9. 既知の制限
 
-- **型の整合性（`mypy`）で製品コードに4件の指摘が残っています**（`mypy nurse verify.py evaluate.py nurse_csp.py tools --ignore-missing-imports`。cpmpy は型情報を持たないため、式は `Expression` として扱う）。`nurse/optional.py` の `1 - self.x(…, 休)` が3件（`x` は値が取れないとき `None` を返しうるが、「休」は必ず取れる前提で書いてある）、`nurse/diagnosis.py` の `involved` が1件（`None` と空リストの扱い）。型ヒントだけでは直せず、コードの変更になる。検査（CI）には入れていない。
+- **型の整合性（`mypy`）**: 製品コードの指摘は0件（`mypy nurse verify.py evaluate.py nurse_csp.py tools --ignore-missing-imports --disallow-untyped-defs`。cpmpy は型情報を持たないため、式は `Expression` として扱う）。テストコードには12件の指摘が残る（`re.match(…).group` など、テストの書き方に由来するもの）。検査（CI）には入れていない。
 - **合成データでの検証が中心です**。需要・確定休・履歴は乱数と手作りの値で、実在の病棟ではありません。
 - **`night_band` をオフにすると求解が大幅に遅くなります**（72時間ルールの補助変数が全員分になる。30人・30日で 1.7秒 → 33秒、別の回は120秒でも未解決）。72時間ルールの界が `night_band` を前提にしているため、その前提が無いときは健全な式（補助変数が増える）を使う。
 - **求解時間は規模より日数と72時間ルールで決まります**。同じ人数でも日数が1日増えると数倍になる条件がある。ワーカー数は複数並列で動くため、同じ条件でも試行ごとにばらつく。

@@ -170,7 +170,7 @@ class OptionalConstraints(ModelKernel):
         if not cells:
             return []
         cap = math.floor(self.eps.req_viol_ratio * len(cells))
-        return [Item(cp.sum([1 - self.x(n, self.t(d), self.OFF) for n, d in cells]) <= cap,
+        return [Item(cp.sum([1 - self.x_taken(n, self.t(d), self.OFF) for n, d in cells]) <= cap,
                      (), (Param("要望数", len(cells)), Param("違反数", cap)))]
 
     @constraint("req_shift", "EPS", scope="optional", title="シフト要望違反数上限")
@@ -183,7 +183,7 @@ class OptionalConstraints(ModelKernel):
         if not cells:
             return []
         cap = math.floor(self.eps.req_viol_ratio * len(cells))
-        return [Item(cp.sum([1 - self.x(n, self.t(d), s) for n, d, s in cells]) <= cap,
+        return [Item(cp.sum([1 - self.x_taken(n, self.t(d), s) for n, d, s in cells]) <= cap,
                      (), (Param("要望数", len(cells)), Param("違反数", cap)))]
 
     @constraint("soft_off", "EPS", scope="optional", title="希望休違反数上限")
@@ -192,6 +192,6 @@ class OptionalConstraints(ModelKernel):
 
         Returns:
             制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
-        viol = [1 - self.x(n, self.t(d), self.OFF) for n, ds in self.I.soft_off.items() for d in ds]
+        viol = [1 - self.x_taken(n, self.t(d), self.OFF) for n, ds in self.I.soft_off.items() for d in ds]
         return [Item(cp.sum(viol) <= self.eps.soft_off_viol,
                      (), (Param("要望数", len(viol)), Param("違反数", self.eps.soft_off_viol)))] if viol else []
