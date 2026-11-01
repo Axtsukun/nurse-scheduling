@@ -86,6 +86,11 @@ nurse-scheduling/
 │   ├── test_diagnose.py    診断（時間切れ / 制約矛盾 / 前提同士の矛盾 / MUS が極小 / MUS の時間制限）  13件
 │   └── test_evaluate.py    評価の集計が解と整合すること                              3件
 │
+├── docs/design/            設計の仕様
+│   ├── constraint-message-spec.md  制約名・メッセージの仕様
+│   └── class-diagram.md    クラス図（コア部分: IF・データモデル・数理モデル・求解エンジン）
+├── docs/notes/             作業メモ（次のタスクの準備、調査結果、検討資料）
+│
 └── docs/legal/             法令・基準の調査（制約の根拠・確度・実装状況）
     ├── README.md           この調査の使い方、区分と確度の凡例
     ├── constraints.yaml    制約32件の機械可読な一覧（id・区分・確度・対応するモデルの制約名・実装状況）
@@ -102,24 +107,78 @@ nurse-scheduling/
 
 ### 3.1 データの流れ
 
-```
-Instance（入力 + Rules）
-   │  NurseModel(I, eps).build()      … 有効な制約ごとに式を生成（registry が選ぶ）
-   ▼
-{制約名: [式…]} ──cp.Model──▶ CP-SAT ──▶ SolveResult(ok, status, model, times, counts)
-                                          │                │
-                                   解あり │                │ 解なし
-                                          ▼                ▼
-                          verify.extract(model)     diagnose(I, eps) → Diagnosis
-                                  │                   ├ 時間切れ（矛盾かは不明）
-                                  ▼                   └ 制約矛盾 → MUS（exact）→ 日本語の説明
-                        割当表 A[n][d]（勤務の添字）
-                           │                │
-              verify.check(I, eps, A)   evaluate.evaluate(I, A)
-              （独立に規則を検査）        （集計・表示）
+**① 図（UML シーケンス図）**
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as 利用者（nurse_csp など）
+    participant S as solver.solve
+    participant M as NurseModel
+    participant R as registry
+    participant C as CP-SAT（ortools）
+    participant D as diagnosis.diagnose
+    participant X as exact（MUS）
+    participant V as verify
+    participant E as evaluate
+
+    U->>S: solve(I, eps, time_limit)
+    activate S
+    S->>M: NurseModel(I, eps).build()
+    M->>R: selected_constraints(I)
+    R-->>M: 有効な制約名
+    M-->>S: {制約名: [式…]}
+    S->>C: Model(式).solve(time_limit)
+    C-->>S: 解あり / 解なし / 時間切れ
+    S-->>U: SolveResult(ok, status, model, times, counts)
+    deactivate S
+    alt ok = True（解あり）
+        U->>V: extract(model)
+        V-->>U: 割当表 A[n][d]
+        U->>V: check(I, eps, A)
+        V-->>U: 違反の一覧（空なら合格）
+        U->>E: evaluate(I, A)
+        E-->>U: 集計結果
+    else ok = False（解なし・時間切れ）
+        U->>D: diagnose(I, eps, time_limit, mus_time_limit)
+        activate D
+        D->>S: solve(I, eps, time_limit)
+        S-->>D: SolveResult
+        alt 時間切れ（矛盾かは不明）
+            D-->>U: Diagnosis（timeout）
+        else 解なしと確定
+            D->>C: 前提（カーネル・層1）だけの充足判定
+            C-->>D: 充足 / 矛盾
+            D->>X: 事前候補（コア）→ mus（時間制限つき）
+            X-->>D: MUS（最小でない場合あり）
+            D-->>U: Diagnosis（conflict）
+        end
+        deactivate D
+    end
 ```
 
-計時は `build`（式の生成）・`transform`（CPMpy からソルバーへの変換）・`solve`（求解）の3つに分けて返す。
+**② 説明**
+
+| 登場者 | 実体 | 役割 |
+|---|---|---|
+| 利用者 | `nurse_csp.py`、テスト、利用者のコード | 求解・診断・検証・評価を順に呼ぶ |
+| `solver.solve` | `nurse/solver.py` | 式を作り、CP-SAT に渡して解き、`SolveResult` を返す |
+| `NurseModel` | `nurse/model.py` | 有効な制約ごとに式を生成する（`build`） |
+| `registry` | `nurse/registry.py` | `Rules.off`・`enabled` を反映して、有効な制約名を選ぶ |
+| CP-SAT | OR-Tools（CPMpy 経由） | 求解と、充足判定 |
+| `diagnosis.diagnose` | `nurse/diagnosis.py` | 解けない原因を「時間切れ」と「制約矛盾」に分け、矛盾なら MUS を求める |
+| exact | PB ソルバー exact（CPMpy 経由） | 矛盾の原因（MUS）の計算 |
+| `verify` / `evaluate` | `verify.py` / `evaluate.py` | 解の独立検査 / 解の集計 |
+
+図の番号に沿った流れ:
+
+- **1〜8 求解**: `solve` が `NurseModel` を作り（2）、`registry` が有効な制約を選ぶ（3〜4）。制約名ごとの式の辞書（5）を CP-SAT に渡して解き（6〜7）、`SolveResult(ok, status, model, times, counts)` を返す（8）。計時は `build`（式の生成）・`transform`（CPMpy からソルバーへの変換）・`solve`（求解）の3つに分けて `times` に入る。
+- **9〜14 解あり（`ok = True`）**: モデルから割当表 `A[n][d]`（勤務の添字）を取り出し（9〜10）、独立検証器で検査する（11〜12。モデルの式を使わず、元の規則から直接数える）。続けて評価（集計）を行う（13〜14）。
+- **15〜23 解なし・時間切れ（`ok = False`）**: `diagnose` は `solve` をもう一度呼ぶ（16〜17。通常求解の結果は再利用しない）。
+  - 時間切れなら、矛盾かどうかは不明なので MUS を求めず `Diagnosis(timeout)` を返す（18）。
+  - 解なしと確定したら、前提（カーネル・層1）だけの充足判定を行い（19〜20）、矛盾の原因（MUS）を求める（21〜22）。MUS は、まず仮定つきの求解で事前候補（コア）を取り、`mus` を時間制限つきで実行する。時間内に終われば最小、打ち切れば事前候補を返す（`minimal=False`）。結果は `Diagnosis(conflict)`（23）で、`explain()` が日本語で説明する。
+- **図で省いたこと**: 前提だけで矛盾する場合（`hard_only`）は、MUS を前提の中から求める。この分岐は図に描いていない。時間制限（`time_limit`・`mus_time_limit`）の既定値は `nurse.properties` から読む（4.6 節）。
+- **記法**: 実線の矢印は呼び出し、破線の矢印は戻り値、`alt` は条件分岐、縦長の箱は実行中（活性区間）を表す。
 
 ### 3.2 層構成（制約の分け方）
 
@@ -160,18 +219,100 @@ Instance（入力 + Rules）
 
 ### 3.4 モジュールの依存（下向きのみ）
 
-```
-instance ◀── solution
-   ▲  ◀────── preprocess
-   ▲  ◀────── synthetic
-   ▲
-registry ◀── kernel ◀── law ───────┐
-   ▲   ▲         ▲  ◀── domain ────┼─▶ model ◀── solver ◀── diagnosis
-   │   │         ▲  ◀── optional ──┘
-message─┘  （law・domain・optional は preprocess・message も使う。registry も message を使う）
+**① 図（UML パッケージ図に相当）**
 
-nurse 全体 ◀── nurse_csp.py / verify.py / evaluate.py / bench_*.py / tests
+```mermaid
+flowchart TB
+    subgraph EXT["利用者（nurse パッケージの外）"]
+        direction LR
+        nurse_csp["«module»<br/>nurse_csp.py"]
+        evaluate["«module»<br/>evaluate.py"]
+        verify["«module»<br/>verify.py"]
+        others["«module»<br/>bench_*.py / tests"]
+    end
+    subgraph NURSE["«package» nurse"]
+        direction TB
+        diagnosis["«module»<br/>diagnosis"]
+        solver["«module»<br/>solver"]
+        model["«module»<br/>model"]
+        law["«module»<br/>law"]
+        domain["«module»<br/>domain"]
+        optional["«module»<br/>optional"]
+        kernel["«module»<br/>kernel"]
+        registry["«module»<br/>registry"]
+        message["«module»<br/>message"]
+        preprocess["«module»<br/>preprocess"]
+        solution["«module»<br/>solution"]
+        synthetic["«module»<br/>synthetic"]
+        config["«module»<br/>config"]
+        instance["«module»<br/>instance"]
+        codes["«module»<br/>codes"]
+    end
+    nurse_csp -.-> NURSE
+    evaluate -.-> NURSE
+    verify -.-> NURSE
+    others -.-> NURSE
+    evaluate -.-> verify
+    diagnosis -.-> solver
+    solver -.-> model
+    solver -.-> config
+    model -.-> law
+    model -.-> domain
+    model -.-> optional
+    law -.-> kernel
+    domain -.-> kernel
+    optional -.-> kernel
+    law -.-> preprocess
+    domain -.-> preprocess
+    optional -.-> preprocess
+    kernel -.-> registry
+    registry -.-> message
+    message -.-> instance
+    preprocess -.-> instance
+    solution -.-> instance
+    synthetic -.-> instance
+    instance -.-> codes
+    config -.-> codes
 ```
+
+Mermaid には UML のパッケージ図がないので、flowchart で UML の表記（`«package»`・`«module»`、破線の依存矢印）に合わせている。矢印は「依存する側 → 依存される側」（`import` している側から、されている側へ）。
+
+**② 説明**
+
+- **依存は下向きのみ**。循環はない（`nurse/` の全モジュールの `import` から機械的に確認した）。「層」の番号は、そのモジュールが依存する先をたどった最長の長さで、番号の大きいモジュールが小さいモジュールを使う。
+- **図の矢印は、推移的に含まれる依存を省いている**（例: `law` は `registry` も直接 `import` するが、`kernel` 経由で到達できるので描かない）。省かない完全な直接依存は、下の表のとおり（`nurse` 内の依存は39本。図には、このうち20本を描いている）。
+- `nurse_csp.py`・`verify.py`・`evaluate.py`・`bench_*.py`・テストは `nurse` パッケージ全体に依存する（`evaluate.py` は `verify.py` も使う）。
+- 外部ライブラリは、表の最後の列のとおり。CPMpy は制約を作るモジュール（`kernel`・`law`・`domain`・`optional`）と、求解・診断（`solver`・`diagnosis`）が使う。
+
+| 層 | モジュール | 役割 | 直接の依存（`nurse` 内） | 外部ライブラリ |
+|---|---|---|---|---|
+| 0 | `codes` | リターンコード `ReturnCode` と例外（`InputError` など） | — | — |
+| 1 | `config` | 設定ファイル `nurse.properties` の読み込み（`Settings`） | `codes` | — |
+| 1 | `instance` | 入力データ `Instance`・層ごとのパラメータ・`Eps` | `codes` | numpy |
+| 2 | `message` | 制約メッセージの部品と整形器 `Renderer` | `instance` | — |
+| 2 | `preprocess` | 時刻データから係数・集合・窓を作る純Python | `codes`, `instance` | — |
+| 2 | `solution` | 解（割当表）の読み取り部品 | `instance` | — |
+| 2 | `synthetic` | 合成インスタンス・個別要望の付与 | `instance` | numpy |
+| 3 | `registry` | `@constraint` の登録、名前つき制約（`Item`・`Aux`・`Named`）、有効な制約の選択 | `codes`, `instance`, `message` | — |
+| 4 | `kernel` | 決定変数 `x` と式の部品、構造制約（`ModelKernel`） | `instance`, `message`, `registry` | cpmpy |
+| 5 | `domain` | 層2 病院・看護職共通の制約（`DomainConstraints`） | `instance`, `kernel`, `message`, `preprocess`, `registry` | cpmpy |
+| 5 | `law` | 層1 労働法規の制約（`LawConstraints`） | `codes`, `kernel`, `message`, `preprocess`, `registry` | cpmpy |
+| 5 | `optional` | 層3 努力義務・要望の制約（`OptionalConstraints`） | `instance`, `kernel`, `message`, `preprocess`, `registry` | cpmpy |
+| 6 | `model` | `NurseModel`（上の3つの合成） | `domain`, `law`, `optional` | — |
+| 7 | `solver` | `solve`・`SolveResult`・`roster` | `config`, `instance`, `model` | cpmpy, numpy |
+| 8 | `diagnosis` | 解けないときの診断（`diagnose`・`Diagnosis`） | `codes`, `config`, `instance`, `registry`, `solver` | cpmpy |
+
+### 3.5 クラス図（コア部分）
+
+コア部分（IF・データモデル・数理モデル・求解エンジン）のクラス図は、`docs/design/class-diagram.md` にまとめている（Mermaid、5枚）。
+
+| 図 | 内容 |
+|---|---|
+| 図1 全体像 | 4つの領域の主なクラスと、領域をまたぐ関係 |
+| 図2 データモデル | `Instance`・`ShiftDef`・`Rules`・各 `Params`・`Eps` |
+| 図3 数理モデル | `ModelKernel`・ミックスイン・`NurseModel`・登録の仕組み（`ConstraintSpec`・`Item`・`Aux`・`Named`）・`Renderer` |
+| 図4 求解エンジン | `solver`・`SolveResult`・`diagnosis`・`Diagnosis` と外部ソルバー |
+| 図5 IF | `nurse_csp`・設定（`Settings`）・戻り値（`ReturnCode`）・例外・`verify`・`evaluate` |
 
 ---
 
