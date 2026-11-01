@@ -24,7 +24,7 @@ verify.py               # 独立検証器（制約名ごとの検査関数 CHECK
 evaluate.py             # 解の評価（集計と表示）
 bench_*.py              # 計測スクリプト
 docs/legal/             # 法令・基準の調査（制約の根拠）
-docs/design/            # 設計の仕様（制約名・メッセージの仕様 constraint-message-spec.md）
+docs/design/            # 設計の仕様（constraint-message-spec.md、クラス図 class-diagram.md。構成を変えたら README 3.4 の表と図も直す）
 docs/notes/             # 作業メモ（次のタスクの準備 next-tasks.md。状況に応じて更新する）
 tests/
 ```
