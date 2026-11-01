@@ -177,10 +177,10 @@ def test_class_diagram_matches_the_code():
     assert not problems, "\n" + "\n".join(problems)
 
 
-# ---- GitHub Pages サイト ----
+# ---- ドキュメントサイト（MkDocs。公開はしない） ----
 def test_pages_site_builds_without_warnings(tmp_path):
     """mkdocs.yml のとおりにサイトが警告なしでビルドでき、README が index になり、作業メモが載らない。
-    （MkDocs が無い環境ではスキップ。CI の Pages ワークフローも同じ --strict ビルドを行う）"""
+    （MkDocs が無い環境ではスキップ。CI のワークフローも同じ --strict ビルドを行う）"""
     import subprocess
     pytest = importlib.import_module("pytest")
     pytest.importorskip("mkdocs")
