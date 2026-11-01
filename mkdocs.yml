@@ -1,0 +1,65 @@
+# GitHub Pages サイトの設定（MkDocs + Material）。
+# 本文は README.md と docs/ をそのまま使い、サイト用の複製は持たない（tools/mkdocs_hooks.py が README を index に組み込む）。
+site_name: ナーススケジューリング CSP エンジン
+site_description: 看護師の勤務表を制約充足問題として解くエンジンの仕様・設計・法令根拠
+repo_url: https://github.com/Axtsukun/nurse-scheduling
+repo_name: Axtsukun/nurse-scheduling
+edit_uri: ""
+docs_dir: docs
+site_dir: _site
+use_directory_urls: true
+
+hooks:
+  - tools/mkdocs_hooks.py
+
+# サイトに載せない文書（作業メモは内部検討を含むため公開しない）と、サイトに不要なファイル
+exclude_docs: |
+  notes/
+  legal/constraints.yaml
+
+theme:
+  name: material
+  language: ja
+  features:
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - content.code.copy
+    - search.suggest
+  palette:
+    - scheme: default
+      toggle: {icon: material/weather-night, name: ダークモードへ}
+    - scheme: slate
+      toggle: {icon: material/weather-sunny, name: ライトモードへ}
+
+nav:
+  - 概要・使い方: index.md
+  - 設計:
+      - クラス図: design/class-diagram.md
+      - 制約メッセージの仕様: design/constraint-message-spec.md
+  - 法令・基準:
+      - 調査の概要: legal/README.md
+      - 01 労働基準法等: legal/01_law.md
+      - 02 診療報酬: legal/02_reimbursement.md
+      - 03 ガイドライン: legal/03_guidelines.md
+      - 04 モデルとの対応: legal/04_model_mapping.md
+      - 05 出典と未確認事項: legal/05_sources_and_gaps.md
+
+markdown_extensions:
+  - tables
+  - admonition
+  - toc:
+      permalink: true
+      # 日本語の見出しをアンカーに残す（既定の slugify は非 ASCII を落とし、README の目次リンクが切れる）
+      slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower}}
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
