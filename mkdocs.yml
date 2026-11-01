@@ -71,9 +71,12 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: [.]          # ソースを実行せず構文解析で読む（cpmpy 等の依存は不要）
+          paths: [.]   # ソースを実行せず構文解析で読む（cpmpy 等の依存は不要）
           options:
-            docstring_style: null     # docstring は日本語の自由文。Markdown としてそのまま表示する
+            extensions:
+              - tools/griffe_comments.py:InlineComments   # 項目の行末コメントを説明として表示する
+            heading_level: 1
+            docstring_style: google   # 日本語の自由文はそのまま Markdown として表示し、`Args:` `Returns:` の節だけ表にする
             members_order: source
             show_root_heading: true
             show_source: false

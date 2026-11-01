@@ -24,9 +24,19 @@ class SolveResult(NamedTuple):
 
 def solve(I: Instance, eps: Eps, time_limit: float | None = None, workers: int = 8, lin_level: int = 1,
           solver: str = SOLVE_SOLVER, enabled: set[str] | None = None) -> SolveResult:
-    """solver: 既定は SOLVE_SOLVER = "ortools"(CP-SAT)。"exact" / "pysat" は実験用。workers・lin_level は ortools のみ。
-    enabled: 有効にする制約名（None=全て）。カーネル・層1は外せない（Rules.off と同じ規則）。
-    time_limit: 求解の時間制限（秒）。省略すると nurse.properties の solve.time_limit（既定30秒）を使う。"""
+    """入力データから制約モデルを作って解く（目的関数なし。すべての制約を満たす勤務表を1つ探す）。
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        time_limit: 求解の時間制限（秒）。省略すると nurse.properties の `solve.time_limit`（既定30秒）を使う。
+        workers: 並列に探索するワーカー数（ortools のみ）。
+        lin_level: 線形緩和の強さ 0/1/2（ortools の `linearization_level`。CLI の `--lin`）。
+        solver: 既定は `SOLVE_SOLVER` = "ortools"（CP-SAT）。"exact" / "pysat" は実験用。
+        enabled: 有効にする制約名（None=全て）。カーネル・層1は外せない（`Rules.off` と同じ規則）。
+
+    Returns:
+        `SolveResult`。従来どおり `ok, status, M, times, counts = solve(...)` と展開もできる。"""
     if time_limit is None:
         time_limit = load_settings().solve_time_limit
     t0 = time.perf_counter()

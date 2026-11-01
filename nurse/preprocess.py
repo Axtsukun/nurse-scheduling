@@ -19,10 +19,15 @@ def night_units(I: Instance, s: int) -> int:
 
 
 def rest_cliques(I: Instance) -> list[tuple[frozenset, frozenset]]:
-    """勤務間隔 ρ の禁止関係を閾値分解した (A_θ, B_θ) の列。
-    禁止 ⇔ start_b + 48 − end_a < ρ。θ = end_a ごとに
-      A_θ = {a : end_a ≥ θ},  B_θ = {b : start_b + 48 < θ + ρ}
-    とすれば x[n,t,A_θ] + x[n,t+1,B_θ] ≤ 1 が全禁止ペアを厳密に表す。
+    """勤務間隔 ρ の禁止関係を閾値分解した `(A_θ, B_θ)` の列。
+
+    禁止 ⇔ `start_b + 48 − end_a < ρ`。θ = `end_a` ごとに
+
+    ```
+    A_θ = {a : end_a ≥ θ},  B_θ = {b : start_b + 48 < θ + ρ}
+    ```
+
+    とすれば `x[n,t,A_θ] + x[n,t+1,B_θ] ≤ 1` が全禁止ペアを厳密に表す。
     θ 昇順で B_θ が直前と同じものは支配される（A が小さい）ので除く。"""
     W = [s for s, sd in enumerate(I.shifts) if sd.is_work]
     out, prev_B = [], None
@@ -41,10 +46,12 @@ def overnight_shifts(I: Instance) -> list[int]:
 
 
 def holiday_windows(I: Instance) -> list[tuple[int, int, int]]:
-    """労基法35条の休日の窓 (t0, t1, k): 時点 [t0, t1) に休日が k 日以上（時点 t = H + 計画日 d）。
-    weekly : 週の起算曜日 week_start から始まる7日の窓。k=1（35条1項）
-    4w4d   : four_week_origin から28日ごとの窓。k=4（35条2項）
-    計画期間に1日以上かかり、かつ [0, H+T) に完全に収まる窓だけを返す（計画の外にはみ出す窓は検査できない）。
+    """労基法35条の休日の窓 `(t0, t1, k)`: 時点 `[t0, t1)` に休日が k 日以上（時点 t = H + 計画日 d）。
+
+    - `weekly`: 週の起算曜日 `week_start` から始まる7日の窓。k=1（35条1項）
+    - `4w4d`: `four_week_origin` から28日ごとの窓。k=4（35条2項）
+
+    計画期間に1日以上かかり、かつ `[0, H+T)` に完全に収まる窓だけを返す（計画の外にはみ出す窓は検査できない）。
     履歴（前月末）の時点は実績として窓に含まれる。"""
     H, T, law = I.n_history, I.n_days, I.rules.law
     if law.holiday_rule == HOLIDAY_WEEKLY:
@@ -86,9 +93,10 @@ def cover_intervals(I: Instance, d: int) -> list[tuple[frozenset, int]]:
 
 def symmetry_classes(I: Instance, mode: str) -> list[list[int]]:
     """同種の看護師の同値類（大きさ 2 以上のものだけ返す）。
-    exact  : 取れる値・公休数・資格・夜勤専従・閾値・履歴・固定割当・希望休がすべて一致（入れ替えが解の対称性になる。健全）
-    relaxed: 取れる値・公休数・資格・夜勤専従・閾値のみ一致（履歴・固定割当・希望休の違いは無視。入れ替えは
-             厳密な対称性ではないため、解を取りこぼす可能性がある不完全な絞り込み）"""
+
+    - `exact`: 取れる値・公休数・資格・夜勤専従・閾値・履歴・固定割当・希望休がすべて一致（入れ替えが解の対称性になる。健全）
+    - `relaxed`: 取れる値・公休数・資格・夜勤専従・閾値のみ一致（履歴・固定割当・希望休の違いは無視。入れ替えは
+      厳密な対称性ではないため、解を取りこぼす可能性がある不完全な絞り込み）"""
     groups: dict[tuple, list[int]] = {}
     for n in range(I.n_nurses):
         key = (tuple(I.domain[n]), I.off_days[n], n in I.seniors, n in I.night_only, inclusion_threshold(I, n))

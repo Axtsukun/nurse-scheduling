@@ -1,3 +1,1 @@
-# `nurse.codes`
-
 ::: nurse.codes

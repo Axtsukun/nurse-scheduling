@@ -1,3 +1,1 @@
-# `nurse.domain`
-
 ::: nurse.domain

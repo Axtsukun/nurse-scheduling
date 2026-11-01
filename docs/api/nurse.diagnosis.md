@@ -1,3 +1,1 @@
-# `nurse.diagnosis`
-
 ::: nurse.diagnosis

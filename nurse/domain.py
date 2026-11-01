@@ -9,6 +9,7 @@ from .preprocess import cover_spans, night_units
 
 
 class DomainConstraints(ModelKernel):
+    """層2（domain）の制約。病院・看護職共通（診療報酬の施設基準など）。`Rules.off` でオフにできる。`ModelKernel` を継承したミックスイン。"""
 
     @constraint("offcount", "L3", scope="domain", title="公休数一致")
     def c_offcount(self):

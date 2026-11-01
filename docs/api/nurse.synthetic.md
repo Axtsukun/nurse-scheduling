@@ -1,3 +1,1 @@
-# `nurse.synthetic`
-
 ::: nurse.synthetic

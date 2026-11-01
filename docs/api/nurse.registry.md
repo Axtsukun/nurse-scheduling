@@ -1,3 +1,1 @@
-# `nurse.registry`
-
 ::: nurse.registry

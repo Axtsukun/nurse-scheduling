@@ -9,6 +9,7 @@ from .codes import InputError
 
 
 class LawConstraints(ModelKernel):
+    """層1（law）の制約。労働法規に由来し、オフにできない。`ModelKernel` を継承したミックスイン。"""
 
     @constraint("holiday", "L2", scope="law", source=("LAW-HOLIDAY",), title="休日数下限")
     def c_holiday(self):

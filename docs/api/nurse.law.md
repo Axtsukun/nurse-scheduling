@@ -1,3 +1,1 @@
-# `nurse.law`
-
 ::: nurse.law

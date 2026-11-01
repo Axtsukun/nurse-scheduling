@@ -210,3 +210,52 @@ def test_api_reference_covers_every_module():
         assert f"api/{m}.md" in nav, f"{m}: mkdocs.yml の nav にない"
     extra = {p.stem for p in (ROOT / "docs/api").glob("*.md")} - set(modules) - {"index"}
     assert not extra, f"存在しないモジュールのページ: {extra}"
+
+
+# ---- API 文書の読みやすさ（docstring） ----
+_API_FILES = [ROOT / f for f in ("nurse_csp.py", "verify.py", "evaluate.py")] + sorted(PKG.glob("*.py"))
+
+
+def _public_docstring_owners():
+    """(ファイル, 名前, ノード): モジュール・公開のクラス・公開の関数/メソッド（_ で始まるものは除く）"""
+    for p in _API_FILES:
+        tree = ast.parse(p.read_text(encoding="utf-8"))
+        yield p, "(module)", tree
+
+        def walk(body, prefix):
+            for n in body:
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and not n.name.startswith("_"):
+                    yield p, prefix + n.name, n
+                    if isinstance(n, ast.ClassDef):
+                        yield from walk(n.body, prefix + n.name + ".")
+        yield from walk(tree.body, "")
+
+
+def test_every_public_api_has_a_docstring():
+    """API リファレンスは docstring から作る。公開のモジュール・クラス・関数に説明が無いと、文書に何も出ない。"""
+    missing = [f"{p.name}:{name}" for p, name, n in _public_docstring_owners() if not ast.get_docstring(n)]
+    assert not missing, "docstring が無い: " + ", ".join(missing)
+
+
+def test_docstring_lists_and_tables_have_a_blank_line_before():
+    """docstring は Markdown として表示される。箇条書き・番号リスト・表・見出し・コードの前に空行が無いと、
+    直前の段落に連結して1行に潰れる（読めなくなる）。"""
+    item = re.compile(r"^\s*([-*] |\d+\. |#{1,6} |\||```)")
+    bad = []
+    for p, name, n in _public_docstring_owners():
+        doc = ast.get_docstring(n)
+        if not doc:
+            continue
+        lines, fence = doc.split("\n"), False
+        for i, line in enumerate(lines):
+            if line.strip().startswith("```"):
+                if not fence and i and lines[i - 1].strip():
+                    bad.append(f"{p.name}:{name} 行{i + 1}: {line.strip()[:30]}")
+                fence = not fence
+                continue
+            if fence or not item.match(line) or i == 0:
+                continue
+            prev = lines[i - 1]
+            if prev.strip() and not item.match(prev) and not re.match(r"^\s+\S", prev):
+                bad.append(f"{p.name}:{name} 行{i + 1}: {line.strip()[:30]}")
+    assert not bad, "リスト・表・見出しの前に空行が無い:\n" + "\n".join(bad)

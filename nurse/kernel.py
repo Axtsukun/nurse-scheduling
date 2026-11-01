@@ -10,17 +10,20 @@ from .registry import REGISTRY, ConstraintSpec, Item, Aux, Named, constraint, se
 
 
 class ModelKernel:
-    """決定変数 x[n,t,s]（s ∈ D_n のみ生成する疎な形）を保持する。
-    D_n = S_n ∪ {固定割当・履歴に現れる値}
-    識別子: `self.xv[n]` … 看護師 n の boolvar 配列 shape=(H+T, |D_n|)
-            `self.col[n][s]` … 値 s の列番号、 `self.dom[n]` … D_n（昇順リスト）
-            self.active … build() で有効になった制約名（他の制約の前提を確かめるために使う）"""
+    """決定変数 `x[n,t,s]`（s ∈ D_n のみ生成する疎な形）を保持する。D_n = S_n ∪ {固定割当・履歴に現れる値}。
+
+    識別子:
+
+    - `self.xv[n]` … 看護師 n の boolvar 配列。shape=(H+T, |D_n|)
+    - `self.col[n][s]` … 値 s の列番号
+    - `self.dom[n]` … D_n（昇順リスト）
+    - `self.active` … `build()` で有効になった制約名（他の制約の前提を確かめるために使う）"""
 
     def __init__(self, I: Instance, eps: Eps):
         self.I, self.eps = I, eps
         self.H, self.T = I.n_history, I.n_days
-        self.N = range(I.n_nurses)
-        self.OFF = I.idx(OFF_NAME)
+        self.N = range(I.n_nurses)  # 看護師の添字の範囲 𝒩
+        self.OFF = I.idx(OFF_NAME)  # 「休」の勤務の添字
         fixed_values: dict[int, set[int]] = {}
         for (n, _), s in I.fixed.items():
             fixed_values.setdefault(n, set()).add(s)
@@ -31,7 +34,7 @@ class ModelKernel:
             self.col.append({s: j for j, s in enumerate(Dn)})
             self.xv.append(cp.boolvar(shape=(self.H + self.T, len(Dn)), name=f"x{n}"))
         self._work: dict[tuple[int, int], object] = {}
-        self.active: frozenset[str] = frozenset(selected_constraints(I))
+        self.active: frozenset[str] = frozenset(selected_constraints(I))  # build() で有効になった制約名
 
     # ---- 式の部品（変数は作らない） ----
     def t(self, d: int) -> int:

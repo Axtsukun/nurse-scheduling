@@ -25,7 +25,8 @@ TOGGLEABLE = ("domain", "optional")      # Rules.off / solve(enabled=...) で外
 
 @dataclass(frozen=True)
 class ConstraintSpec:
-    name: str
+    """登録された制約1件の定義。`@constraint` が REGISTRY に入れる。"""
+    name: str                        # 制約名（registry の識別子）
     layer: str                       # 式の作り方の分類
     relaxable: bool                  # 診断で指示変数を付けてよいか（緩和候補か）
     method: str                      # NurseModel のメソッド名
@@ -39,16 +40,16 @@ class Item:
     """個別の規則: 式 + 対象（target）+ パラメータ（params）。制約メソッドが返す。
     target は部品（message.Nurse / Day / DaySpan / Span / Cat / Shift / 文字列）の並び、
     params は message.Param の並び。メッセージは、この2つから整形器が作る。"""
-    expr: object
-    target: tuple = ()
-    params: tuple = ()
+    expr: object                # 制約式
+    target: tuple = ()          # 対象の部品の並び
+    params: tuple = ()          # Param の並び
 
 
 @dataclass(frozen=True)
 class Aux:
     """補助変数の定義式（制約メソッドが返す）。補助変数は決められた値に定まるので、常に成り立つ側（hard）として
     扱い、矛盾の説明（MUS）の候補にしない。"""
-    expr: object
+    expr: object                # 補助変数の定義式
 
 
 @dataclass(frozen=True, eq=False)

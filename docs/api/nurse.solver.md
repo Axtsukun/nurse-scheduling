@@ -1,3 +1,1 @@
-# `nurse.solver`
-
 ::: nurse.solver

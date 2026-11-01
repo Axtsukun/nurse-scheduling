@@ -1,3 +1,1 @@
-# `nurse.config`
-
 ::: nurse.config
