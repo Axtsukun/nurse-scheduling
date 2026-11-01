@@ -13,7 +13,10 @@
 整形器（message.Renderer）で作る（診断のときだけ生成。build では文字列を作らない）。
 """
 from __future__ import annotations
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
+from typing import TypeVar
+from cpmpy.expressions.core import Expression
 from .instance import Instance
 from .message import Renderer
 from .codes import InputError
@@ -52,6 +55,13 @@ class Aux:
     expr: object                # 補助変数の定義式
 
 
+Constraints = Sequence[Expression | Item | Aux]
+"""制約メソッドの戻り値の型。CPMpy の式、または式を包んだ `Item`（対象・パラメータつき）・`Aux`（補助変数の定義）の並び（読み取り専用）。"""
+ConstraintList = list[Expression | Item | Aux]
+"""`Constraints` を組み立てる途中の、追加できるリスト。"""
+_F = TypeVar("_F", bound=Callable[..., object])
+
+
 @dataclass(frozen=True, eq=False)
 class Named:
     """正規化した制約。診断で式（CPMpy の式）から ID・制約クラス・メッセージを引き戻すために持つ"""
@@ -81,7 +91,7 @@ REGISTRY: dict[str, ConstraintSpec] = {}
 
 
 def constraint(name: str, layer: str, relaxable: bool = True, scope: str = "optional",
-               source: tuple[str, ...] = (), title: str = ""):
+               source: tuple[str, ...] = (), title: str = "") -> Callable[[_F], _F]:
     """制約メソッドを登録するデコレータ。メソッドは `list[Expression | Item | Aux]` を返すだけ（副作用なし）。
     補助変数は、そのメソッド内で生成する。
 
@@ -100,7 +110,7 @@ def constraint(name: str, layer: str, relaxable: bool = True, scope: str = "opti
     if name in REGISTRY:
         raise InputError(f"制約名が重複: {name!r}")
 
-    def deco(fn):
+    def deco(fn: _F) -> _F:
         REGISTRY[name] = ConstraintSpec(name, layer, relaxable, fn.__name__, scope, tuple(source), title)
         return fn
     return deco
@@ -127,7 +137,7 @@ def selected_constraints(I: Instance, enabled: set[str] | None = None) -> list[s
             if sp.scope in MANDATORY or (nm not in I.rules.off and (enabled is None or nm in enabled))]
 
 
-def toggleable(names=None) -> list[str]:
+def toggleable(names: Collection[str] | None = None) -> list[str]:
     """層2・層3の制約名（実験で1つずつ外す対象）。names を渡すとその中から選ぶ
 
     Args:

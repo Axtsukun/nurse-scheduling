@@ -9,6 +9,8 @@ import importlib
 import inspect
 import re
 import sys, pathlib
+from collections.abc import Iterator
+from typing import Any
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import nurse_csp, verify, evaluate
@@ -37,7 +39,7 @@ def _levels(deps: dict[str, set[str]]) -> dict[str, int]:
     """段 = 依存先をたどった最長の長さ（依存のないモジュールが 0）。循環があれば ValueError"""
     out: dict[str, int] = {}
 
-    def lv(m, path=()):
+    def lv(m: str, path: tuple[str, ...] = ()) -> int:
         if m in path:
             raise ValueError(f"循環: {' → '.join(path + (m,))}")
         if m not in out:
@@ -52,13 +54,13 @@ def _section(text: str, start: str, end: str) -> str:
     return text[text.index(start):text.index(end)]
 
 
-def test_module_dependencies_have_no_cycles():
+def test_module_dependencies_have_no_cycles() -> None:
     deps, _ = _actual_deps()
     assert all(d in deps for ds in deps.values() for d in ds)          # 依存先はすべて nurse 内のモジュール
     _levels(deps)                                                       # 循環があれば ValueError
 
 
-def test_readme_dependency_table_matches_the_imports():
+def test_readme_dependency_table_matches_the_imports() -> None:
     deps, ext = _actual_deps()
     level = _levels(deps)
     rows = {}
@@ -72,10 +74,10 @@ def test_readme_dependency_table_matches_the_imports():
         assert (lv, ds, es) == (level[m], deps[m], ext[m]), f"{m}: 表={ (lv, sorted(ds), sorted(es)) } コード={ (level[m], sorted(deps[m]), sorted(ext[m])) }"
 
 
-def test_readme_dependency_diagram_is_the_transitive_reduction_of_the_imports():
+def test_readme_dependency_diagram_is_the_transitive_reduction_of_the_imports() -> None:
     deps, _ = _actual_deps()
 
-    def reach(a, seen=None):
+    def reach(a: str, seen: set[str] | None = None) -> set[str]:
         seen = set() if seen is None else seen
         for b in deps[a]:
             if b not in seen:
@@ -110,7 +112,7 @@ def _generics(text: str) -> str:
     return text
 
 
-def _instance_attrs(cls) -> set[str]:
+def _instance_attrs(cls: type) -> set[str]:
     out = set()
     for c in cls.__mro__:
         try:
@@ -120,7 +122,7 @@ def _instance_attrs(cls) -> set[str]:
     return out
 
 
-def _return_type(obj) -> str:
+def _return_type(obj: Any) -> str:
     fn = obj.fget if isinstance(obj, property) else obj
     try:
         ann = inspect.signature(fn).return_annotation
@@ -131,13 +133,13 @@ def _return_type(obj) -> str:
     return ann if isinstance(ann, str) else getattr(ann, "__name__", str(ann))
 
 
-def _diagram_classes():
+def _diagram_classes() -> Iterator[tuple[int, str, list[str]]]:
     for fi, fig in enumerate(re.findall(r"```mermaid\n(.*?)```", CLASS_DOC, re.S), 1):
         for m in re.finditer(r"^( *)class (\w+)(?:\[[^\]]*\])? \{\n(.*?)\n\1\}", fig, re.S | re.M):
             yield fi, m.group(2), [ln.strip() for ln in m.group(3).split("\n") if ln.strip() and not ln.strip().startswith("<<")]
 
 
-def test_class_diagram_matches_the_code():
+def test_class_diagram_matches_the_code() -> None:
     objs = _code_objects()
     problems, checked = [], 0
     for fi, name, members in _diagram_classes():
@@ -178,7 +180,7 @@ def test_class_diagram_matches_the_code():
 
 
 # ---- ドキュメントサイト（MkDocs。公開はしない） ----
-def test_pages_site_builds_without_warnings(tmp_path):
+def test_pages_site_builds_without_warnings(tmp_path: pathlib.Path) -> None:
     """mkdocs.yml のとおりにサイトが警告なしでビルドでき、README が index になり、作業メモが載らない。
     （MkDocs が無い環境ではスキップ。CI のワークフローも同じ --strict ビルドを行う）"""
     import subprocess
@@ -198,7 +200,7 @@ def test_pages_site_builds_without_warnings(tmp_path):
     assert n == expected > 0, (n, expected)
 
 
-def test_api_reference_covers_every_module():
+def test_api_reference_covers_every_module() -> None:
     """API リファレンス（docs/api/）が、全モジュールを漏れなく載せ、mkdocs.yml の nav にも入っていること。
     モジュールを足したのにページを足し忘れると、ここで気づく。"""
     modules = ["nurse_csp", "verify", "evaluate", "nurse"] + [f"nurse.{p.stem}" for p in PKG.glob("*.py") if p.stem != "__init__"]
@@ -216,28 +218,37 @@ def test_api_reference_covers_every_module():
 _API_FILES = [ROOT / f for f in ("nurse_csp.py", "verify.py", "evaluate.py")] + sorted(PKG.glob("*.py"))
 
 
-def _public_docstring_owners():
+def _functions(body: list[ast.stmt], prefix: str = "") -> Iterator[tuple[str, ast.FunctionDef]]:
+    """モジュール・クラス直下の関数・メソッドと、その名前（入れ子の関数は含まない）。"""
+    for n in body:
+        if isinstance(n, ast.FunctionDef):
+            yield prefix + n.name, n
+        elif isinstance(n, ast.ClassDef):
+            yield from _functions(n.body, prefix + n.name + ".")
+
+
+def _public_docstring_owners() -> Iterator[tuple[pathlib.Path, str, ast.Module | ast.FunctionDef | ast.ClassDef]]:
     """(ファイル, 名前, ノード): モジュール・公開のクラス・公開の関数/メソッド（_ で始まるものは除く）"""
     for p in _API_FILES:
         tree = ast.parse(p.read_text(encoding="utf-8"))
         yield p, "(module)", tree
 
-        def walk(body, prefix):
+        def classes_and_functions(body: list[ast.stmt], prefix: str) -> Iterator[tuple[pathlib.Path, str, ast.Module | ast.FunctionDef | ast.ClassDef]]:
             for n in body:
                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and not n.name.startswith("_"):
                     yield p, prefix + n.name, n
                     if isinstance(n, ast.ClassDef):
-                        yield from walk(n.body, prefix + n.name + ".")
-        yield from walk(tree.body, "")
+                        yield from classes_and_functions(n.body, prefix + n.name + ".")
+        yield from classes_and_functions(tree.body, "")
 
 
-def test_every_public_api_has_a_docstring():
+def test_every_public_api_has_a_docstring() -> None:
     """API リファレンスは docstring から作る。公開のモジュール・クラス・関数に説明が無いと、文書に何も出ない。"""
     missing = [f"{p.name}:{name}" for p, name, n in _public_docstring_owners() if not ast.get_docstring(n)]
     assert not missing, "docstring が無い: " + ", ".join(missing)
 
 
-def test_docstring_lists_and_tables_have_a_blank_line_before():
+def test_docstring_lists_and_tables_have_a_blank_line_before() -> None:
     """docstring は Markdown として表示される。箇条書き・番号リスト・表・見出し・コードの前に空行が無いと、
     直前の段落に連結して1行に潰れる（読めなくなる）。"""
     item = re.compile(r"^\s*([-*] |\d+\. |#{1,6} |\||```)")
@@ -261,23 +272,38 @@ def test_docstring_lists_and_tables_have_a_blank_line_before():
     assert not bad, "リスト・表・見出しの前に空行が無い:\n" + "\n".join(bad)
 
 
-def test_every_function_documents_its_args_and_returns():
+def test_every_function_documents_its_args_and_returns() -> None:
     """公開・内部を問わず、引数がある関数は `Args:`、値を返す関数（戻り値の型注釈が None 以外）は `Returns:` の節を持つ。
     API リファレンスの引数表・戻り値表の元になる。property は対象外（名前と1行の説明で足りる）。"""
     missing = []
     for p in _API_FILES:
-        def walk(body, prefix):
-            for n in body:
-                if isinstance(n, ast.FunctionDef):
-                    if any(isinstance(d, ast.Name) and d.id == "property" for d in n.decorator_list):
-                        continue
-                    doc = ast.get_docstring(n) or ""
-                    params = [a.arg for a in n.args.args + n.args.kwonlyargs if a.arg not in ("self", "cls")]
-                    returns = n.returns is not None and ast.unparse(n.returns) != "None"
-                    if not doc or (params and "Args:" not in doc) or (returns and "Returns:" not in doc):
-                        missing.append(f"{p.name}:{prefix}{n.name}")
-                elif isinstance(n, ast.ClassDef):
-                    yield from walk(n.body, prefix + n.name + ".")
-            yield
-        list(walk(ast.parse(p.read_text(encoding="utf-8")).body, ""))
+        for name, n in _functions(ast.parse(p.read_text(encoding="utf-8")).body):
+            if any(isinstance(d, ast.Name) and d.id == "property" for d in n.decorator_list):
+                continue
+            doc = ast.get_docstring(n) or ""
+            params = [a.arg for a in n.args.args + n.args.kwonlyargs if a.arg not in ("self", "cls")]
+            returns = n.returns is not None and ast.unparse(n.returns) != "None"
+            if not doc or (params and "Args:" not in doc) or (returns and "Returns:" not in doc):
+                missing.append(f"{p.name}:{name}")
     assert not missing, "Args / Returns の節が足りない: " + ", ".join(missing)
+
+
+# ---- 型ヒント ----
+_TYPED_FILES = _API_FILES + sorted((ROOT / "tools").glob("*.py")) + sorted((ROOT / "tests").glob("*.py"))
+
+
+def test_every_function_has_type_hints() -> None:
+    """型ヒントは必須: 製品コード・ツール・テストの全関数（入れ子の関数も）で、self / cls 以外のすべての引数と、戻り値に型を付ける。
+    （lambda は書けないので対象外。`*args` / `**kwargs` も型を付ける）"""
+    missing = []
+    for p in _TYPED_FILES:
+        for n in ast.walk(ast.parse(p.read_text(encoding="utf-8"))):
+            if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            a = n.args
+            params = [x for x in a.posonlyargs + a.args + a.kwonlyargs if x.arg not in ("self", "cls")]
+            params += [v for v in (a.vararg, a.kwarg) if v is not None]
+            lacking = [x.arg for x in params if x.annotation is None] + (["戻り値"] if n.returns is None else [])
+            if lacking:
+                missing.append(f"{p.relative_to(ROOT)}:{n.lineno} {n.name}（{', '.join(lacking)}）")
+    assert not missing, "型ヒントが無い:\n" + "\n".join(missing)

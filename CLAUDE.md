@@ -74,6 +74,7 @@ tests/
 - **環境**: GitHub の GraphQL は使えない。`gh pr list` などは失敗するので、PR の作成・確認は REST（`gh api repos/{owner}/{repo}/pulls ...`）で行う。
 
 ## 表記規約
+- **型ヒントは必須**（決定事項）: 製品コード・tools・tests の全関数で、`self` / `cls` 以外のすべての引数と戻り値に型を付ける（入れ子の関数も。`lambda` を除く）。制約メソッドの戻り値は `Constraints`、組み立て中のリストは `ConstraintList`（`nurse/registry.py`）。CPMpy の式は `cpmpy.expressions.core.Expression`。tests/test_docs.py が検査する。
 - 数式記号はコメント・docstring で `x[n,t,s]`, `S_n`, `θ_n` のように書く。識別子とは区別する。
 - 主な対応：x[n,t,s] → `M.x(n,t,s)`（実体 `M.xv[n][t, M.col[n][s]]`）、w[n,t] → `M.work(n,t)`（式）、
   u_s → `night_units(I,s)`、(A_θ,B_θ) → `rest_cliques(I)`、(C_j,r_j) → `cover_intervals(I,d)`、

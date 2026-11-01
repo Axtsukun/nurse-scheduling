@@ -23,8 +23,10 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 import multiprocessing
+from multiprocessing.connection import Connection
 import time
 import cpmpy as cp
+from cpmpy.expressions.core import Expression
 from cpmpy.tools import mus
 from cpmpy.tools.explain.utils import make_assump_model
 from .codes import ReturnCode, SolverUnavailableError, InternalError
@@ -98,7 +100,7 @@ def _require_solver(name: str) -> str:
     return name
 
 
-def _mus_in_child(soft: list, hard: list, solver: str, budget: float):
+def _mus_in_child(soft: list[Expression], hard: list[Expression], solver: str, budget: float) -> list[int] | None:
     """cpmpy.tools.mus を fork した子プロセスで実行し、budget 秒で打ち切る。戻り値は soft の添字の列、打ち切りなら None。
     子は親のメモリをそのまま引き継ぐ（式を pickle しない）ので、結果は soft の添字で返す。
     fork が使えない環境では、時間制限を黙って外さず RuntimeError にする。
@@ -116,7 +118,7 @@ def _mus_in_child(soft: list, hard: list, solver: str, budget: float):
     ctx = multiprocessing.get_context("fork")
     index = {id(e): i for i, e in enumerate(soft)}
 
-    def run(conn) -> None:
+    def run(conn: Connection) -> None:
         try:
             conn.send(("ok", [index[id(c)] for c in mus(soft, hard, solver=solver)]))
         except BaseException as e:                                  # 子の失敗は親に伝える
@@ -141,7 +143,7 @@ def _mus_in_child(soft: list, hard: list, solver: str, budget: float):
     return payload
 
 
-def _bounded_mus(soft: list, hard: list, solver: str, budget: float):
+def _bounded_mus(soft: list[Expression], hard: list[Expression], solver: str, budget: float) -> tuple[list[Expression], bool] | None:
     """時間制限つきの MUS。戻り値は (矛盾する制約の式の列, 最小か)。事前候補も取れなければ None。
     ① 仮定つきの求解 1 回でコア（事前候補。最小とは限らない）を取る。② mus を budget 秒で実行。終われば最小。
     ③ 打ち切りなら、①の事前候補を返す（最小でない可能性）。
@@ -224,11 +226,11 @@ def diagnose(I: Instance, eps: Eps, time_limit: float | None = None, mus_solver:
     solver = _require_solver(mus_solver)
     position = {id(x.expr): i for i, x in enumerate(flat)}              # 定義順（日付順など）で並べる
 
-    def pick(core, pool: list[Named]) -> list[Named]:
+    def pick(core: list[Expression], pool: list[Named]) -> list[Named]:
         by_id = {id(x.expr): x for x in pool}
         return sorted((by_id[id(c)] for c in core if id(c) in by_id), key=lambda x: position[id(x.expr)])
 
-    def run(soft_exprs: list, hard_exprs: list, pool: list[Named]):
+    def run(soft_exprs: list[Expression], hard_exprs: list[Expression], pool: list[Named]) -> tuple[list[Named] | None, bool]:
         """時間制限つきの MUS → (pool のうち矛盾に関わるもの, 最小か)。事前候補も取れなければ (None, False)"""
         got = _bounded_mus(soft_exprs, hard_exprs, solver, mus_time_limit)
         return (None, False) if got is None else (pick(got[0], pool), got[1])
@@ -250,7 +252,7 @@ def diagnose(I: Instance, eps: Eps, time_limit: float | None = None, mus_solver:
     if soft_items is None:                                              # 矛盾は確定しているが、原因を特定できなかった
         return Diagnosis(CONFLICT, state, [], False, times, solver, False)
     t1 = time.perf_counter()
-    involved = []                                                       # soft の矛盾に関わる前提だけに絞る
+    involved: list[Named] | None = []                                                   # soft の矛盾に関わる前提だけに絞る
     if given:
         involved, minimal_given = run(given_exprs, background + [x.expr for x in soft_items], given)
         if involved is None:                                            # 絞れなければ前提は載せない（soft の説明だけ）

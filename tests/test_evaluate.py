@@ -4,7 +4,7 @@ import nurse_csp as m
 import verify, evaluate
 
 
-def test_evaluate_consistent_with_solution():
+def test_evaluate_consistent_with_solution() -> None:
     I, eps = m.synthetic(), m.Eps()
     ok, _, M, _, _ = m.solve(I, eps, time_limit=60)
     assert ok
@@ -19,7 +19,7 @@ def test_evaluate_consistent_with_solution():
     assert abs(ev["night72"]["avg_included"] - verify.report(I, A)["avg_night_hours"]) < 1e-9
 
 
-def test_weekend_stats_matches_verify_definition():
+def test_weekend_stats_matches_verify_definition() -> None:
     I, eps = m.synthetic(), m.Eps()
     ok, _, M, _, _ = m.solve(I, eps, time_limit=60)
     assert ok
@@ -30,7 +30,7 @@ def test_weekend_stats_matches_verify_definition():
     assert wk["n_sat"] == 4 and wk["n_sun"] == 4
 
 
-def test_weekend_spread_within_eps():
+def test_weekend_spread_within_eps() -> None:
     I, eps = m.synthetic(), m.Eps()
     ok, _, M, _, _ = m.solve(I, eps, time_limit=60)
     assert ok

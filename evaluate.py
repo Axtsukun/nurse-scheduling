@@ -77,7 +77,7 @@ def person_stats(I: Instance, A: Assignment, members: list[int]) -> dict:
     Returns:
         `勤務回数`・`勤務時間h`・`夜勤回数` をキーに、それぞれの統計量（`_summary` の形）を値にした辞書。"""
     S = I.shifts
-    vals = {
+    vals: dict[str, list[float]] = {
         "勤務回数": [sum(S[s].is_work for s in A[n]) for n in members],
         "勤務時間h": [sum((S[s].end - S[s].start) for s in A[n] if S[s].is_work) / 2 for n in members],
         "夜勤回数": [sum(S[s].cat in I.night_cats for s in A[n]) for n in members],

@@ -1,8 +1,9 @@
 """層2 病院・看護職共通の制約（診療報酬の施設基準など。病院の判断でオン・オフできる）。根拠は docs/legal/02_reimbursement.md。"""
 from __future__ import annotations
 import cpmpy as cp
+from cpmpy.expressions.core import Expression
 from .kernel import ModelKernel
-from .registry import constraint, Item, Aux
+from .registry import constraint, Item, Aux, Constraints, ConstraintList
 from .instance import DAY, inclusion_threshold, night_band
 from .message import Nurse, Day, Span, Cat, Param
 from .preprocess import cover_spans, night_units
@@ -12,16 +13,22 @@ class DomainConstraints(ModelKernel):
     """層2（domain）の制約。病院・看護職共通（診療報酬の施設基準など）。`Rules.off` でオフにできる。`ModelKernel` を継承したミックスイン。"""
 
     @constraint("offcount", "L3", scope="domain", title="公休数一致")
-    def c_offcount(self):
-        """公休数: Σ_d x[n,H+d,休] = F_n"""
+    def c_offcount(self) -> Constraints:
+        """公休数: Σ_d x[n,H+d,休] = F_n
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         return [Item(cp.sum([self.x(n, self.t(d), self.OFF) for d in range(self.T)]) == self.I.off_days[n],
                      (Nurse(n),), (Param("公休数", self.I.off_days[n]),))
                 for n in self.N]
 
     @constraint("cover", "L4", scope="domain", source=("REIMB-NIGHT-2",), title="人数制約下限")
-    def c_cover(self):
-        """区間人数: Σ_n Σ_{(δ,s)∈C_j} x[n,H+d+δ,s] ≥ r_j（基本区間＋支配除去後の j）"""
-        out = []
+    def c_cover(self) -> Constraints:
+        """区間人数: Σ_n Σ_{(δ,s)∈C_j} x[n,H+d+δ,s] ≥ r_j（基本区間＋支配除去後の j）
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
+        out: ConstraintList = []
         for d in range(self.T):
             for C, r, a, b in cover_spans(self.I, d):
                 terms = [v for n in self.N for off, s in C
@@ -30,19 +37,26 @@ class DomainConstraints(ModelKernel):
         return out
 
     @constraint("skill", "L4", scope="domain", title="リーダー数下限")
-    def c_skill(self):
-        """リーダー: Σ_{n∈L} Σ_{s: k(s)=k} x[n,H+d,s] ≥ 1（k ∈ leader_cats）"""
+    def c_skill(self) -> Constraints:
+        """リーダー: Σ_{n∈L} Σ_{s: k(s)=k} x[n,H+d,s] ≥ 1（k ∈ leader_cats）
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         return [Item(cp.sum([v for n in self.I.seniors for v in self.cat(n, self.t(d), (k,))]) >= 1,
                      (Day(d), Cat(k)), (Param("リーダー数", 1),))
                 for d in range(self.T) for k in self.I.leader_cats]
 
     @constraint("72h", "L5", scope="domain", source=("REIMB-72H", "REIMB-NIGHT-WINDOW", "REIMB-72H-EXCLUDE"),
                 title="夜勤時間平均上限")
-    def c_72h(self):
+    def c_72h(self) -> Constraints:
         """月平均夜勤72h:  Σ_{n∈𝒩'} z_n (h_n − Λ) ≤ q,  h_n = Σ_{d,s} u_s x[n,H+d,s]
-        𝒩' = 夜勤専従者を除く看護師。z_n ⇔ h_n ≥ θ_n（算入）。看護師ごとの項は _night_term が作る。"""
+        𝒩' = 夜勤専従者を除く看護師。z_n ⇔ h_n ≥ θ_n（算入）。看護師ごとの項は _night_term が作る。
+
+        Returns:
+            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
         I = self.I
         u = {s: night_units(I, s) for s in range(len(I.shifts))}
+        out: ConstraintList
         out, hours, included = [], [], []
         for n in self.N:
             term = self._night_term(n, u, out)
@@ -76,7 +90,7 @@ class DomainConstraints(ModelKernel):
         lo, hi = night_band(self.I, self.eps)
         return lo * min(un), hi * max(un + ud) + (T - hi) * max(ud)
 
-    def _night_term(self, n: int, u: dict[int, int], out: list):
+    def _night_term(self, n: int, u: dict[int, int], out: ConstraintList) -> tuple[Expression, Expression | int] | None:
         """看護師 n の (夜勤時間の式, 算入人数への寄与) を返す。算入されないなら None。
           UB_n < θ_n → 常に除外（z_n=0）  / LB_n ≥ θ_n → 常に算入（z_n=1 の定数）
           それ以外   → z_n と y[n,d,s] ≥ x[n,H+d,s] + z_n − 1（片側）を生成し、y で数える。

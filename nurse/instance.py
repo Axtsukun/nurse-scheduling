@@ -49,7 +49,7 @@ class LawParams:
     four_week_origin: int = 0              # 4週の起算日（計画日の添字）
     holiday_strict_calendar: bool = False  # True なら「前日の勤務が日をまたいで食い込む休」は休日に数えない
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """選択肢の値が許される範囲かを検査する。不正なら `InputError`。"""
         if self.holiday_rule not in (HOLIDAY_WEEKLY, HOLIDAY_4W4D):
             raise InputError(f"holiday_rule は {HOLIDAY_WEEKLY!r} か {HOLIDAY_4W4D!r}: {self.holiday_rule!r}")
@@ -69,7 +69,7 @@ class DomainParams:
     incl_slots: dict[str, int] = field(default_factory=lambda: {"7:1": 32, "10:1": 32, "other": 16})  # 区分 → 算入閾値 θ（スロット数）
     short_time_slots: int = 24             # 短時間正職員の閾値（12h）
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """`admission_class` が `incl_slots` にあるかを検査する。無ければ `InputError`。"""
         if self.admission_class not in self.incl_slots:
             raise InputError(f"admission_class は {sorted(self.incl_slots)} のいずれか: {self.admission_class!r}")
@@ -146,7 +146,7 @@ class Instance:
     nurse_names: list[str] | None = None           # 看護師の表示名（職員名・職員ID）。未指定なら N05
     cat_names: dict[str, str] = field(default_factory=dict)   # 勤務区分名の上書き（未指定の区分は既定の表）
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """入力の整合（看護師数の一致、需要が各日を空きなく覆うことなど）を検査する。不正なら `InputError`。"""
         self._check_demand()
         if self.start_date is not None and self.start_date.weekday() != self.start_weekday:

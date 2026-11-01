@@ -231,42 +231,42 @@ classDiagram
         +xv list
         +active frozenset~str~
         +t(d) int
-        +x(n, t, s) boolvar
+        +x(n, t, s) Expression | None
         +xs(n, t, ss) list
-        +work(n, t) expr
-        +wvec(n) array
+        +work(n, t) Expression
+        +wvec(n) NDVarArray
         +cat(n, t, ks) list
-        +night_count(n) expr
+        +night_count(n) Expression
         +is_active(name) bool
         +build_named(enabled) dict
         +build(enabled) dict
-        +c_struct() list
-        +c_history() list
-        +c_fixed() list
+        +c_struct() Constraints
+        +c_history() Constraints
+        +c_fixed() Constraints
     }
     class LawConstraints {
         <<mixin>>
-        +c_holiday() list
+        +c_holiday() Constraints
     }
     class DomainConstraints {
         <<mixin>>
-        +c_offcount() list
-        +c_cover() list
-        +c_skill() list
-        +c_72h() list
+        +c_offcount() Constraints
+        +c_cover() Constraints
+        +c_skill() Constraints
+        +c_72h() Constraints
     }
     class OptionalConstraints {
         <<mixin>>
-        +c_rest() list
-        +c_consec() list
-        +c_offblock() list
-        +c_weekend() list
-        +c_night_band() list
-        +c_weekend_spread() list
-        +c_sym_break() list
-        +c_req_off() list
-        +c_req_shift() list
-        +c_soft_off() list
+        +c_rest() Constraints
+        +c_consec() Constraints
+        +c_offblock() Constraints
+        +c_weekend() Constraints
+        +c_night_band() Constraints
+        +c_weekend_spread() Constraints
+        +c_sym_break() Constraints
+        +c_req_off() Constraints
+        +c_req_shift() Constraints
+        +c_soft_off() Constraints
     }
     class NurseModel
     class registry {

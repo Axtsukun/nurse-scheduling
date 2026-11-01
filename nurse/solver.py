@@ -1,7 +1,7 @@
 """求解と解の表示（診断は diagnosis.py）。計時は build / transform（CPMpy→ソルバー変換）/ solve に分けて返す。"""
 from __future__ import annotations
 import time
-from typing import NamedTuple
+from typing import Any, NamedTuple
 import numpy as np
 import cpmpy as cp
 from .config import load_settings
@@ -16,7 +16,7 @@ SOLVE_SOLVER = "ortools"
 class SolveResult(NamedTuple):
     """solve の戻り値。従来どおりタプルとして展開もできる: ok, status, M, times, counts = solve(...)"""
     ok: bool                       # 解が見つかったか
-    status: object                 # ソルバーの状態（status().exitstatus で名前）
+    status: Any                    # ソルバーの状態（status().exitstatus で名前）
     model: NurseModel              # 変数を持つモデル（解の読み出しに使う）
     times: dict[str, float]        # build（式の生成）/ transform（ソルバーへの変換）/ solve（求解）の秒数
     counts: dict[str, int]         # 制約群ごとの制約本数

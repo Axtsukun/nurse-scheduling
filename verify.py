@@ -9,15 +9,19 @@
 - Rules.off でオフにした制約の検査は行わない（check の off 引数で追加指定もできる）"""
 from __future__ import annotations
 import math
-from typing import Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 from nurse import (Instance, Eps, Assignment, DAY, WEEK, FOUR_WEEKS, OFF_NAME, HOLIDAY_WEEKLY, REGISTRY, MANDATORY,
                    night_units, night_band, night_capable, is_part, weekend_days, weekend_pairs,
                    inclusion_threshold, full_sequences, staff_on_duty)
 
-Check = Callable[[Instance, Eps, Assignment, list], list]       # (I, eps, A, full) -> エラー文のリスト
+if TYPE_CHECKING:                                               # 型のためだけに読む（検証器はモデルの式を使わない）
+    from nurse import NurseModel
+
+Check = Callable[[Instance, Eps, Assignment, list[list[int]]], list[str]]   # (I, eps, A, full) -> エラー文のリスト
 
 
-def extract(M) -> Assignment:
+def extract(M: NurseModel) -> Assignment:
     """NurseModel の解から割当表 A を取り出す（x のみ使用）
 
     Args:
@@ -40,7 +44,7 @@ def extract(M) -> Assignment:
 # =============================================================================
 # 検査（制約名ごと）。full = 履歴を前置した勤務列、時点 t = H + 計画日 d
 # =============================================================================
-def check_fixed(I, eps, A, full):
+def check_fixed(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """ドメイン・固定割当・fixed_only の値
 
     Args:
@@ -64,7 +68,7 @@ def check_fixed(I, eps, A, full):
     return err
 
 
-def check_holiday(I, eps, A, full):
+def check_holiday(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """労基法35条の休日（週の分割・4週ブロックの分割から直接数える。休日 = 「休」の日、有休は数えない）
 
     Args:
@@ -79,7 +83,7 @@ def check_holiday(I, eps, A, full):
     for n in range(I.n_nurses):
         seq = full[n]
 
-        def is_holiday(t):
+        def is_holiday(t: int) -> bool:
             if S[seq[t]].name != OFF_NAME:
                 return False
             if law.holiday_strict_calendar and t > 0:
@@ -106,7 +110,7 @@ def check_holiday(I, eps, A, full):
     return err
 
 
-def check_rest(I, eps, A, full):
+def check_rest(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """勤務間隔（全ての連続2日を時刻で直接判定）
 
     Args:
@@ -126,7 +130,7 @@ def check_rest(I, eps, A, full):
     return err
 
 
-def check_consec(I, eps, A, full):
+def check_consec(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """連続勤務日数（履歴からの連続を含む）
 
     Args:
@@ -137,6 +141,7 @@ def check_consec(I, eps, A, full):
 
     Returns:
         違反の説明文のリスト（空なら充足）。"""
+    err: list[str]
     S, H, err = I.shifts, I.n_history, []
     for n in range(I.n_nurses):
         run = 0
@@ -147,7 +152,7 @@ def check_consec(I, eps, A, full):
     return err
 
 
-def check_offblock(I, eps, A, full):
+def check_offblock(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """非勤務ブロック長 ≥ m
 
     Args:
@@ -158,6 +163,7 @@ def check_offblock(I, eps, A, full):
 
     Returns:
         違反の説明文のリスト（空なら充足）。"""
+    err: list[str]
     S, H, err = I.shifts, I.n_history, []
     if I.min_off_block <= 1:
         return err
@@ -176,7 +182,7 @@ def check_offblock(I, eps, A, full):
     return err
 
 
-def check_offcount(I, eps, A, full):
+def check_offcount(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """公休数 = F_n
 
     Args:
@@ -195,7 +201,7 @@ def check_offcount(I, eps, A, full):
     return err
 
 
-def check_weekend(I, eps, A, full):
+def check_weekend(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """勤務週末数 ≤ W（週末 = 土曜と日曜の組。どちらかに勤務すれば1回）
 
     Args:
@@ -214,7 +220,7 @@ def check_weekend(I, eps, A, full):
     return err
 
 
-def check_night_band(I, eps, A, full):
+def check_night_band(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """夜勤回数が帯 [lo,hi] に入る（夜勤可能・非専従者）
 
     Args:
@@ -235,7 +241,7 @@ def check_night_band(I, eps, A, full):
     return err
 
 
-def check_cover(I, eps, A, full):
+def check_cover(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """人数（30分スロットごとに直接数える。基本区間・支配除去を使わない）
 
     Args:
@@ -258,7 +264,7 @@ def check_cover(I, eps, A, full):
     return err
 
 
-def check_skill(I, eps, A, full):
+def check_skill(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """夜勤リーダー資格者が各日・各区分に1人以上
 
     Args:
@@ -277,7 +283,7 @@ def check_skill(I, eps, A, full):
     return err
 
 
-def check_72h(I, eps, A, full):
+def check_72h(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """72時間ルール（定義どおり: 算入者の延べ夜勤時間 / 算入者数）
 
     Args:
@@ -301,7 +307,7 @@ def check_72h(I, eps, A, full):
     return []
 
 
-def check_weekend_spread(I, eps, A, full):
+def check_weekend_spread(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """土日勤務日数の max−min が区分(正規/パート)内で上限以下
 
     Args:
@@ -322,7 +328,7 @@ def check_weekend_spread(I, eps, A, full):
     return err
 
 
-def check_soft_off(I, eps, A, full):
+def check_soft_off(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """希望休の違反数 ≤ κ
 
     Args:
@@ -338,7 +344,7 @@ def check_soft_off(I, eps, A, full):
     return [f"希望休違反 {viol} > {eps.soft_off_viol}"] if viol > eps.soft_off_viol else []
 
 
-def check_req_off(I, eps, A, full):
+def check_req_off(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """休み要望の違反数 ≤ ⌊ρ·要望数⌋
 
     Args:
@@ -357,7 +363,7 @@ def check_req_off(I, eps, A, full):
     return [f"休み要望違反 {viol} > {cap}"] if viol > cap else []
 
 
-def check_req_shift(I, eps, A, full):
+def check_req_shift(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
     """シフト要望の違反数 ≤ ⌊ρ·要望数⌋
 
     Args:

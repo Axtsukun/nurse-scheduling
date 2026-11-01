@@ -2,6 +2,7 @@
 from __future__ import annotations
 import dataclasses
 import random
+from datetime import date
 import numpy as np
 from .instance import Instance, ShiftDef, DAY, OFF_NAME
 
@@ -55,7 +56,7 @@ def _history(S: list[ShiftDef], n_full: int, n_part: int) -> np.ndarray:
     return np.array(full + part)
 
 
-def _fixed_and_soft(rng: random.Random, S: list[ShiftDef], n: int, T: int):
+def _fixed_and_soft(rng: random.Random, S: list[ShiftDef], n: int, T: int) -> tuple[dict[tuple[int, int], int], dict[int, list[int]]]:
     """確定休（各人2日）・有休（5人に1人が1日）と、希望休（各人2日）を乱数で作る。
     乱数の消費順は結果の再現性に影響するため、変更しない（seed ごとに同じインスタンスになる）
 
@@ -63,7 +64,10 @@ def _fixed_and_soft(rng: random.Random, S: list[ShiftDef], n: int, T: int):
         rng: 乱数生成器。
         S: 勤務の定義のリスト。
         n: 看護師数。
-        T: 計画日数。"""
+        T: 計画日数。
+
+    Returns:
+        `(確定割当 {(看護師, 日): 勤務の添字}, 希望休 {看護師: [日]})`。"""
     idx = {s.name: i for i, s in enumerate(S)}
     fixed = {}
     for i in range(n):
@@ -76,7 +80,7 @@ def _fixed_and_soft(rng: random.Random, S: list[ShiftDef], n: int, T: int):
     return fixed, soft
 
 
-def synthetic(n_full: int = 26, n_part: int = 4, T: int = 30, seed: int = 0, start_date=None) -> Instance:
+def synthetic(n_full: int = 26, n_part: int = 4, T: int = 30, seed: int = 0, start_date: date | None = None) -> Instance:
     """合成インスタンス。n_full/n_part は常勤・パートの人数、T は計画日数、seed は確定休・希望休の乱数。
     start_date は計画日0の日付（月曜日であること。診断のメッセージを MM/DD 表記にする。未指定なら N日目(曜)）。
     需要は平日 [0:00-8:30) 3人・[8:30-17:00) 10人・[17:00-24:00) 3人（土日は日中6人）を常勤数に比例して拡大する。

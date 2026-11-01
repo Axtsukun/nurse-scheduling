@@ -27,12 +27,12 @@ def _inline_comments(path: str) -> dict[int, str]:
 
 
 class InlineComments(griffe.Extension):
-    def on_class_members(self, *, node, cls: griffe.Class, agent, **kwargs) -> None:
+    def on_class_members(self, *, node: object, cls: griffe.Class, agent: object, **kwargs: object) -> None:
         if cls.filepath is None:
             return
         comments = _inline_comments(str(cls.filepath))
         for member in cls.members.values():
-            if member.is_alias or member.kind.value != "attribute" or member.docstring:
+            if not isinstance(member, griffe.Attribute) or member.docstring:
                 continue
             text = comments.get(member.lineno or -1)
             if text:

@@ -62,11 +62,15 @@ class Clock:
     slot: int                    # 時刻（その日の 0:00 からのスロット。日をまたぐと 48 以上）
 
 
+Part = str | Nurse | Day | DaySpan | Span | Cat | Shift | Clock
+"""メッセージの対象に置ける部品の型。文字列はそのまま表示する。"""
+
+
 @dataclass(frozen=True)
 class Param:
     """パラメータ「名前<演算子>値」。値は数値・文字列・上の部品。単位は数値のあとに付ける"""
     name: str                   # 名前（例: 勤務者数）
-    value: object               # 値（数値・文字列・部品）
+    value: float | int | Part   # 値（数値・文字列・部品）
     unit: str = ""              # 単位（数値のあとに付ける）
     op: str = "="               # 演算子（=, ≥, ≤ など）
 
@@ -77,7 +81,7 @@ class Param:
 class Renderer:
     """構造化データを文字にする。表示方針（開始日・看護師名・区分名）は Instance から取る"""
 
-    def __init__(self, I: Instance):
+    def __init__(self, I: Instance) -> None:
         """整形器を作る。
 
         Args:
@@ -154,7 +158,7 @@ class Renderer:
             区分名。"""
         return self.I.cat_names.get(k) or CAT_NAMES.get(k, k)
 
-    def part(self, p) -> str:
+    def part(self, p: Part) -> str:
         """対象の部品1つを文字列にする（文字列はそのまま）。
 
         Args:
@@ -180,7 +184,7 @@ class Renderer:
             return self.clock(p.slot)
         raise TypeError(f"メッセージの部品として使えない: {p!r}")
 
-    def value(self, v) -> str:
+    def value(self, v: float | int | str | Part) -> str:
         """パラメータの値を文字列にする（float は `%g` 形式、int・str はそのまま、それ以外は部品として整形）。
 
         Args:
