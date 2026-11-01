@@ -32,7 +32,15 @@ class LawConstraints(ModelKernel):
     def _holiday_flag(self, n: int, t: int, side_constraints: list):
         """時点 t が看護師 n の休日である指標（0/1 の式または Boolean）。
         既定は x[n,t,休]。holiday_strict_calendar なら、前日の勤務が日をまたぐ日は休日にしない:
-        hol ≤ x[n,t,休], hol ≤ 1 − Σ_{s: 翌日にかかる} x[n,t−1,s]（片側定義。補助制約は side_constraints に足す）。"""
+        hol ≤ x[n,t,休], hol ≤ 1 − Σ_{s: 翌日にかかる} x[n,t−1,s]（片側定義。補助制約は side_constraints に足す）。
+
+        Args:
+            n: 看護師の添字。
+            t: 時点。
+            side_constraints: 補助制約（休日の指標の定義式）を足すリスト。
+
+        Returns:
+            休日の指標（0/1 の式または Boolean）。"""
         off = self.x(n, t, self.OFF)
         if not self.I.rules.law.holiday_strict_calendar or t == 0:
             return off

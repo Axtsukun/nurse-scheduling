@@ -18,7 +18,13 @@ Check = Callable[[Instance, Eps, Assignment, list], list]       # (I, eps, A, fu
 
 
 def extract(M) -> Assignment:
-    """NurseModel の解から割当表 A を取り出す（x のみ使用）"""
+    """NurseModel の解から割当表 A を取り出す（x のみ使用）
+
+    Args:
+        M: 求解後の `NurseModel`（決定変数 `x` に値が入っていること）。
+
+    Returns:
+        割当表 `A`。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。"""
     A = []
     for n in M.N:
         row = []
@@ -35,7 +41,16 @@ def extract(M) -> Assignment:
 # 検査（制約名ごと）。full = 履歴を前置した勤務列、時点 t = H + 計画日 d
 # =============================================================================
 def check_fixed(I, eps, A, full):
-    """ドメイン・固定割当・fixed_only の値"""
+    """ドメイン・固定割当・fixed_only の値
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     S, err = I.shifts, []
     for n in range(I.n_nurses):
         for d, s in enumerate(A[n]):
@@ -50,7 +65,16 @@ def check_fixed(I, eps, A, full):
 
 
 def check_holiday(I, eps, A, full):
-    """労基法35条の休日（週の分割・4週ブロックの分割から直接数える。休日 = 「休」の日、有休は数えない）"""
+    """労基法35条の休日（週の分割・4週ブロックの分割から直接数える。休日 = 「休」の日、有休は数えない）
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     S, H, T, law, err = I.shifts, I.n_history, I.n_days, I.rules.law, []
     for n in range(I.n_nurses):
         seq = full[n]
@@ -83,7 +107,16 @@ def check_holiday(I, eps, A, full):
 
 
 def check_rest(I, eps, A, full):
-    """勤務間隔（全ての連続2日を時刻で直接判定）"""
+    """勤務間隔（全ての連続2日を時刻で直接判定）
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     S, H, T, err = I.shifts, I.n_history, I.n_days, []
     for n in range(I.n_nurses):
         for t in range(H - 1, H + T - 1):
@@ -94,7 +127,16 @@ def check_rest(I, eps, A, full):
 
 
 def check_consec(I, eps, A, full):
-    """連続勤務日数（履歴からの連続を含む）"""
+    """連続勤務日数（履歴からの連続を含む）
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     S, H, err = I.shifts, I.n_history, []
     for n in range(I.n_nurses):
         run = 0
@@ -106,7 +148,16 @@ def check_consec(I, eps, A, full):
 
 
 def check_offblock(I, eps, A, full):
-    """非勤務ブロック長 ≥ m"""
+    """非勤務ブロック長 ≥ m
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     S, H, err = I.shifts, I.n_history, []
     if I.min_off_block <= 1:
         return err
@@ -126,7 +177,16 @@ def check_offblock(I, eps, A, full):
 
 
 def check_offcount(I, eps, A, full):
-    """公休数 = F_n"""
+    """公休数 = F_n
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     S, err = I.shifts, []
     for n in range(I.n_nurses):
         off = sum(1 for s in A[n] if S[s].name == OFF_NAME)
@@ -136,7 +196,16 @@ def check_offcount(I, eps, A, full):
 
 
 def check_weekend(I, eps, A, full):
-    """勤務週末数 ≤ W（週末 = 土曜と日曜の組。どちらかに勤務すれば1回）"""
+    """勤務週末数 ≤ W（週末 = 土曜と日曜の組。どちらかに勤務すれば1回）
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     S, err = I.shifts, []
     for n in range(I.n_nurses):
         we = sum(1 for sat, sun in weekend_pairs(I) if S[A[n][sat]].is_work or S[A[n][sun]].is_work)
@@ -146,7 +215,16 @@ def check_weekend(I, eps, A, full):
 
 
 def check_night_band(I, eps, A, full):
-    """夜勤回数が帯 [lo,hi] に入る（夜勤可能・非専従者）"""
+    """夜勤回数が帯 [lo,hi] に入る（夜勤可能・非専従者）
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     S, err = I.shifts, []
     lo, hi = night_band(I, eps)
     for n in range(I.n_nurses):
@@ -158,7 +236,16 @@ def check_night_band(I, eps, A, full):
 
 
 def check_cover(I, eps, A, full):
-    """人数（30分スロットごとに直接数える。基本区間・支配除去を使わない）"""
+    """人数（30分スロットごとに直接数える。基本区間・支配除去を使わない）
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     err = []
     for d in range(I.n_days):
         for slot in range(DAY):
@@ -172,7 +259,16 @@ def check_cover(I, eps, A, full):
 
 
 def check_skill(I, eps, A, full):
-    """夜勤リーダー資格者が各日・各区分に1人以上"""
+    """夜勤リーダー資格者が各日・各区分に1人以上
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     S, err = I.shifts, []
     for d in range(I.n_days):
         for k in I.leader_cats:
@@ -182,7 +278,16 @@ def check_skill(I, eps, A, full):
 
 
 def check_72h(I, eps, A, full):
-    """72時間ルール（定義どおり: 算入者の延べ夜勤時間 / 算入者数）"""
+    """72時間ルール（定義どおり: 算入者の延べ夜勤時間 / 算入者数）
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     tot, cnt = 0, 0
     for n in range(I.n_nurses):
         if n in I.night_only:
@@ -197,7 +302,16 @@ def check_72h(I, eps, A, full):
 
 
 def check_weekend_spread(I, eps, A, full):
-    """土日勤務日数の max−min が区分(正規/パート)内で上限以下"""
+    """土日勤務日数の max−min が区分(正規/パート)内で上限以下
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     S, err = I.shifts, []
     sat, sun = weekend_days(I)
     e = [sum(S[A[n][d]].is_work for d in sat + sun) for n in range(I.n_nurses)]
@@ -209,14 +323,32 @@ def check_weekend_spread(I, eps, A, full):
 
 
 def check_soft_off(I, eps, A, full):
-    """希望休の違反数 ≤ κ"""
+    """希望休の違反数 ≤ κ
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     S = I.shifts
     viol = sum(1 for n, ds in I.soft_off.items() for d in ds if S[A[n][d]].name != OFF_NAME)
     return [f"希望休違反 {viol} > {eps.soft_off_viol}"] if viol > eps.soft_off_viol else []
 
 
 def check_req_off(I, eps, A, full):
-    """休み要望の違反数 ≤ ⌊ρ·要望数⌋"""
+    """休み要望の違反数 ≤ ⌊ρ·要望数⌋
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     S = I.shifts
     cells = [(n, d) for n, ds in I.req_off.items() for d in ds]
     if not cells:
@@ -226,7 +358,16 @@ def check_req_off(I, eps, A, full):
 
 
 def check_req_shift(I, eps, A, full):
-    """シフト要望の違反数 ≤ ⌊ρ·要望数⌋"""
+    """シフト要望の違反数 ≤ ⌊ρ·要望数⌋
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
+
+    Returns:
+        違反の説明文のリスト（空なら充足）。"""
     cells = [(n, d, s) for n, ds in I.req_shift.items() for d, s in ds]
     if not cells:
         return []
@@ -247,7 +388,16 @@ CHECKS: dict[str, Check] = {
 
 def check(I: Instance, eps: Eps, A: Assignment, off: frozenset | set = frozenset()) -> list[str]:
     """解 A を検査してエラー文のリストを返す（空なら全て充足）。
-    Rules.off と off 引数で指定した制約の検査は行わない（カーネル・層1は外せない）。"""
+    Rules.off と off 引数で指定した制約の検査は行わない（カーネル・層1は外せない）。
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約の閾値。
+        A: 割当表。
+        off: 検査しない制約名（`Rules.off` に加えて指定する）。カーネル・層1の制約は指定できない。
+
+    Returns:
+        違反の説明文のリスト（空なら全て充足）。"""
     skipped = set(I.rules.off) | set(off)
     bad = [nm for nm in skipped if nm in REGISTRY and REGISTRY[nm].scope in MANDATORY]
     if bad:
@@ -261,7 +411,14 @@ def check(I: Instance, eps: Eps, A: Assignment, off: frozenset | set = frozenset
 
 
 def report(I: Instance, A: Assignment) -> dict:
-    """解の要約（72h平均など）"""
+    """解の要約（72h平均など）
+
+    Args:
+        I: 入力データ。
+        A: 割当表。
+
+    Returns:
+        `avg_night_hours`（72時間ルールの算入者の平均夜勤時間）・`included`（算入者数）・`excluded`（除外者数）を持つ辞書。"""
     hs = {n: sum(night_units(I, s) for s in A[n]) for n in range(I.n_nurses) if n not in I.night_only}
     inc = [h for n, h in hs.items() if h >= inclusion_threshold(I, n)]
     return dict(avg_night_hours=(sum(inc) / len(inc) / 2) if inc else 0.0,

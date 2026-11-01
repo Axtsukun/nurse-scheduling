@@ -18,7 +18,13 @@ from nurse import (Eps, synthetic, precheck, solve, diagnose, roster, load_setti
 
 
 def run(argv: list[str] | None = None) -> ReturnCode:
-    """CLI の本体。リターンコードを返す（例外は呼び出し側 main が終了コードにする）"""
+    """CLI の本体。リターンコードを返す（例外は呼び出し側 main が終了コードにする）
+
+    Args:
+        argv: コマンドライン引数（`--lin`・`--time-limit`・`--mus-time-limit`・`--properties`）。省略すると `sys.argv` を使う。
+
+    Returns:
+        リターンコード。解が見つかれば `OK`、解けなければ診断結果のコード（`Diagnosis.code`）。"""
     import argparse
     ap = argparse.ArgumentParser(description="合成インスタンス1問を求解する（評価は evaluate.py）")
     ap.add_argument("--lin", type=int, default=1, help="linearization_level（0/1/2）")
@@ -47,7 +53,13 @@ def run(argv: list[str] | None = None) -> ReturnCode:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """終了コードを返す。想定した例外（NurseError）は、メッセージとコードだけを出す。想定外の例外は内部エラー（50）"""
+    """終了コードを返す。想定した例外（NurseError）は、メッセージとコードだけを出す。想定外の例外は内部エラー（50）
+
+    Args:
+        argv: `run` に渡すコマンドライン引数。
+
+    Returns:
+        終了コード（`ReturnCode` の整数値）。"""
     try:
         code = run(argv)
     except NurseError as e:

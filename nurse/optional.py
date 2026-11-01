@@ -28,7 +28,13 @@ class OptionalConstraints(ModelKernel):
 
     def _rest_params(self, A: frozenset) -> tuple:
         """勤務間隔の制約（閾値 θ の組 A_θ, B_θ）のパラメータ。θ = A_θ の最も早い終業時刻なので、組ごとに値が変わる:
-        前日の終業が θ 以降の勤務の次は、翌日の始業が θ + ρ − 48 より前の勤務に就けない"""
+        前日の終業が θ 以降の勤務の次は、翌日の始業が θ + ρ − 48 より前の勤務に就けない
+
+        Args:
+            A: 閾値 θ の組の A_θ（勤務の添字の集合）。
+
+        Returns:
+            `Param` の組（勤務間隔・前日終業・翌日始業）。"""
         I = self.I
         theta = min(I.shifts[a].end for a in A)
         return (Param("勤務間隔", I.min_rest / 2, "h"),

@@ -20,6 +20,11 @@ class ModelKernel:
     - `self.active` … `build()` で有効になった制約名（他の制約の前提を確かめるために使う）"""
 
     def __init__(self, I: Instance, eps: Eps):
+        """決定変数 `x` を看護師ごとに作る（取れる値の集合 D_n だけの疎な形）。
+
+        Args:
+            I: 入力データ。
+            eps: ε 制約（品質要件）の閾値。"""
         self.I, self.eps = I, eps
         self.H, self.T = I.n_history, I.n_days
         self.N = range(I.n_nurses)  # 看護師の添字の範囲 𝒩
@@ -38,45 +43,106 @@ class ModelKernel:
 
     # ---- 式の部品（変数は作らない） ----
     def t(self, d: int) -> int:
-        """計画日 d → 時点 t = H + d"""
+        """計画日 d → 時点 t = H + d
+
+        Args:
+            d: 計画日（0 始まり）。
+
+        Returns:
+            時点 t = H + d（H は履歴の日数）。"""
         return self.H + d
 
     def x(self, n: int, t: int, s: int):
-        """x[n,t,s]。s ∉ D_n なら None（その値は取れない）"""
+        """x[n,t,s]。s ∉ D_n なら None（その値は取れない）
+
+        Args:
+            n: 看護師の添字。
+            t: 時点。
+            s: 勤務の添字。
+
+        Returns:
+            決定変数 `x[n,t,s]`。s が D_n に無ければ `None`。"""
         j = self.col[n].get(s)
         return None if j is None else self.xv[n][t, j]
 
     def xs(self, n: int, t: int, ss) -> list:
-        """{x[n,t,s] : s ∈ ss ∩ D_n}"""
+        """{x[n,t,s] : s ∈ ss ∩ D_n}
+
+        Args:
+            n: 看護師の添字。
+            t: 時点。
+            ss: 勤務の添字の集まり。
+
+        Returns:
+            `x[n,t,s]` のリスト（D_n に無い s は除く）。"""
         return [v for s in ss if (v := self.x(n, t, s)) is not None]
 
     def work(self, n: int, t: int):
-        """w[n,t] = Σ_{s: work_s} x[n,t,s]（ExactlyOne により 0/1。変数ではなく式。同じ (n,t) は使い回す）"""
+        """w[n,t] = Σ_{s: work_s} x[n,t,s]（ExactlyOne により 0/1。変数ではなく式。同じ (n,t) は使い回す）
+
+        Args:
+            n: 看護師の添字。
+            t: 時点。
+
+        Returns:
+            勤務かを表す式 `w[n,t]`（0 または 1）。"""
         key = (n, t)
         if key not in self._work:
             self._work[key] = cp.sum(self.xs(n, t, [s for s in self.dom[n] if self.I.shifts[s].is_work]))
         return self._work[key]
 
     def wvec(self, n: int):
-        """w[n,·] を時点順に並べた CPMpy 式配列（長さ H+T。スライスして cp.sum に渡す）"""
+        """w[n,·] を時点順に並べた CPMpy 式配列（長さ H+T。スライスして cp.sum に渡す）
+
+        Args:
+            n: 看護師の添字。
+
+        Returns:
+            `w[n,·]` を時点順に並べた CPMpy の式配列（長さ H+T）。"""
         return cp.cpm_array([self.work(n, t) for t in range(self.H + self.T)])
 
     def cat(self, n: int, t: int, ks) -> list:
-        """{x[n,t,s] : k(s) ∈ ks}"""
+        """{x[n,t,s] : k(s) ∈ ks}
+
+        Args:
+            n: 看護師の添字。
+            t: 時点。
+            ks: 勤務区分の集まり（`ShiftDef.cat`）。
+
+        Returns:
+            区分が `ks` に入る勤務の `x[n,t,s]` のリスト。"""
         return self.xs(n, t, [s for s in self.dom[n] if self.I.shifts[s].cat in ks])
 
     def night_count(self, n: int):
-        """c[n] = Σ_d Σ_{k(s)∈𝒦^night} x[n,H+d,s]（夜勤回数の式）"""
+        """c[n] = Σ_d Σ_{k(s)∈𝒦^night} x[n,H+d,s]（夜勤回数の式）
+
+        Args:
+            n: 看護師の添字。
+
+        Returns:
+            夜勤回数 `c[n]` の式。"""
         return cp.sum([v for d in range(self.T) for v in self.cat(n, self.t(d), self.I.night_cats)])
 
     def is_active(self, name: str) -> bool:
-        """制約 name が今回のモデルで有効か（他の制約を前提とする式の導出に使う）"""
+        """制約 name が今回のモデルで有効か（他の制約を前提とする式の導出に使う）
+
+        Args:
+            name: 制約名。
+
+        Returns:
+            有効なら `True`。"""
         return name in self.active
 
     def build_named(self, enabled: set[str] | None = None) -> dict[str, list[Named]]:
         """有効な制約を {制約名: [Named…]} で返す。有効な集合は selected_constraints が決める。
         制約メソッドが返す Expression / Item / Aux を Named（ID・制約クラス・対象・パラメータ・hard か）に正規化する。
-        ID は `{群}-{群内連番4桁}`（連番は、その群の制約メソッドが返した順。補助変数の定義も数える）。"""
+        ID は `{群}-{群内連番4桁}`（連番は、その群の制約メソッドが返した順。補助変数の定義も数える）。
+
+        Args:
+            enabled: 有効にする制約名（`None` なら全て）。カーネル・層1は外せない。
+
+        Returns:
+            `{制約名: [Named…]}`。"""
         names = selected_constraints(self.I, enabled)
         self.active = frozenset(names)
         return {nm: [self._named(REGISTRY[nm], i, c)
@@ -84,7 +150,15 @@ class ModelKernel:
 
     def _named(self, spec: ConstraintSpec, i: int, c) -> Named:
         """制約メソッドの戻り値の1要素を Named にする（i は群内の0始まりの位置）。
-        hard = relaxable=False の群、または Aux（補助変数の定義）。メッセージはここでは作らない（Named.message が遅延生成）"""
+        hard = relaxable=False の群、または Aux（補助変数の定義）。メッセージはここでは作らない（Named.message が遅延生成）
+
+        Args:
+            spec: 制約の登録情報。
+            i: 群内の0始まりの位置。
+            c: 制約メソッドが返した要素（式・`Item`・`Aux`）。
+
+        Returns:
+            正規化した `Named`（ID・制約クラス・式・hard か・対象・パラメータ）。"""
         ident = f"{spec.name}-{i + 1:04d}"
         if isinstance(c, Aux):
             return Named(ident, spec.name, spec.title, c.expr, True, ctx=self.I)
@@ -93,7 +167,13 @@ class ModelKernel:
         return Named(ident, spec.name, spec.title, c, not spec.relaxable, ctx=self.I)
 
     def build(self, enabled: set[str] | None = None) -> dict[str, list]:
-        """有効な制約を {制約名: 式のリスト} で返す（求解用）"""
+        """有効な制約を {制約名: 式のリスト} で返す（求解用）
+
+        Args:
+            enabled: 有効にする制約名（`None` なら全て）。
+
+        Returns:
+            `{制約名: 式のリスト}`（求解用）。"""
         return {nm: [x.expr for x in items] for nm, items in self.build_named(enabled).items()}
 
     # ---- カーネルの構造制約（常に有効） ----

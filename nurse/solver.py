@@ -56,7 +56,13 @@ def solve(I: Instance, eps: Eps, time_limit: float | None = None, workers: int =
 
 
 def roster(M: NurseModel) -> list[str]:
-    """勤務表の文字列表示。解の読み出しは x からのみ（y は片側定義のため値を使わない）"""
+    """勤務表の文字列表示。解の読み出しは x からのみ（y は片側定義のため値を使わない）
+
+    Args:
+        M: 求解後の `NurseModel`。
+
+    Returns:
+        看護師ごとの1行の文字列のリスト（`N01 休 日勤 …`）。"""
     rows = []
     for n in M.N:
         cells = []

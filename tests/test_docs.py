@@ -259,3 +259,25 @@ def test_docstring_lists_and_tables_have_a_blank_line_before():
             if prev.strip() and not item.match(prev) and not re.match(r"^\s+\S", prev):
                 bad.append(f"{p.name}:{name} 行{i + 1}: {line.strip()[:30]}")
     assert not bad, "リスト・表・見出しの前に空行が無い:\n" + "\n".join(bad)
+
+
+def test_every_function_documents_its_args_and_returns():
+    """公開・内部を問わず、引数がある関数は `Args:`、値を返す関数（戻り値の型注釈が None 以外）は `Returns:` の節を持つ。
+    API リファレンスの引数表・戻り値表の元になる。property は対象外（名前と1行の説明で足りる）。"""
+    missing = []
+    for p in _API_FILES:
+        def walk(body, prefix):
+            for n in body:
+                if isinstance(n, ast.FunctionDef):
+                    if any(isinstance(d, ast.Name) and d.id == "property" for d in n.decorator_list):
+                        continue
+                    doc = ast.get_docstring(n) or ""
+                    params = [a.arg for a in n.args.args + n.args.kwonlyargs if a.arg not in ("self", "cls")]
+                    returns = n.returns is not None and ast.unparse(n.returns) != "None"
+                    if not doc or (params and "Args:" not in doc) or (returns and "Returns:" not in doc):
+                        missing.append(f"{p.name}:{prefix}{n.name}")
+                elif isinstance(n, ast.ClassDef):
+                    yield from walk(n.body, prefix + n.name + ".")
+            yield
+        list(walk(ast.parse(p.read_text(encoding="utf-8")).body, ""))
+    assert not missing, "Args / Returns の節が足りない: " + ", ".join(missing)

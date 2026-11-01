@@ -9,12 +9,28 @@ Assignment = list[list[int]]
 
 
 def full_sequences(I: Instance, A: Assignment) -> list[list[int]]:
-    """履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d"""
+    """履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d
+
+    Args:
+        I: 入力データ。
+        A: 割当表。
+
+    Returns:
+        看護師ごとの勤務列（履歴を前置。長さ H+T）。"""
     return [[int(v) for v in I.history[n]] + A[n] for n in range(I.n_nurses)]
 
 
 def staff_on_duty(I: Instance, full: list[list[int]], d: int, slot: int) -> int:
-    """日 d の 30分スロット slot に勤務中の人数（前日から日をまたぐ勤務を含む。式を使わず直接数える）"""
+    """日 d の 30分スロット slot に勤務中の人数（前日から日をまたぐ勤務を含む。式を使わず直接数える）
+
+    Args:
+        I: 入力データ。
+        full: `full_sequences` の結果。
+        d: 計画日。
+        slot: その日の 0:00 からのスロット。
+
+    Returns:
+        勤務中の人数。"""
     H, cnt = I.n_history, 0
     for seq in full:
         for off in (-1, 0):

@@ -9,7 +9,14 @@ from .codes import InputError
 
 
 def night_units(I: Instance, s: int) -> int:
-    """u_s: 勤務 s と夜勤時間帯（前日・当日・翌日の窓）の重なり − 申し送り（スロット数）"""
+    """u_s: 勤務 s と夜勤時間帯（前日・当日・翌日の窓）の重なり − 申し送り（スロット数）
+
+    Args:
+        I: 入力データ。
+        s: 勤務の添字。
+
+    Returns:
+        夜勤時間のスロット数 u_s（夜勤時間帯と重なる分から申し送りを引いた値）。"""
     sd = I.shifts[s]
     if not sd.is_work:
         return 0
@@ -28,7 +35,13 @@ def rest_cliques(I: Instance) -> list[tuple[frozenset, frozenset]]:
     ```
 
     とすれば `x[n,t,A_θ] + x[n,t+1,B_θ] ≤ 1` が全禁止ペアを厳密に表す。
-    θ 昇順で B_θ が直前と同じものは支配される（A が小さい）ので除く。"""
+    θ 昇順で B_θ が直前と同じものは支配される（A が小さい）ので除く。
+
+    Args:
+        I: 入力データ。
+
+    Returns:
+        `(A_θ, B_θ)` の組のリスト。各集合は勤務の添字の集合。"""
     W = [s for s, sd in enumerate(I.shifts) if sd.is_work]
     out, prev_B = [], None
     for th in sorted({I.shifts[a].end for a in W}):
@@ -41,7 +54,13 @@ def rest_cliques(I: Instance) -> list[tuple[frozenset, frozenset]]:
 
 
 def overnight_shifts(I: Instance) -> list[int]:
-    """翌日にかかる勤務（end > 48）の添字。暦日単位の休日の判定に使う"""
+    """翌日にかかる勤務（end > 48）の添字。暦日単位の休日の判定に使う
+
+    Args:
+        I: 入力データ。
+
+    Returns:
+        翌日にかかる勤務の添字のリスト。"""
     return [s for s, sd in enumerate(I.shifts) if sd.is_work and sd.end > DAY]
 
 
@@ -52,7 +71,13 @@ def holiday_windows(I: Instance) -> list[tuple[int, int, int]]:
     - `4w4d`: `four_week_origin` から28日ごとの窓。k=4（35条2項）
 
     計画期間に1日以上かかり、かつ `[0, H+T)` に完全に収まる窓だけを返す（計画の外にはみ出す窓は検査できない）。
-    履歴（前月末）の時点は実績として窓に含まれる。"""
+    履歴（前月末）の時点は実績として窓に含まれる。
+
+    Args:
+        I: 入力データ。
+
+    Returns:
+        `(t0, t1, k)` のリスト。"""
     H, T, law = I.n_history, I.n_days, I.rules.law
     if law.holiday_rule == HOLIDAY_WEEKLY:
         span, need = WEEK, 1
@@ -70,7 +95,14 @@ def cover_spans(I: Instance, d: int) -> list[tuple[frozenset, int, int, int]]:
     """日 d の人数制約 (C_j, r_j, a_j, b_j) の列。C_j は区間 [a_j, b_j) を全時間覆う (日オフセット δ∈{−1,0}, s) の集合。
     需要は番（需要区間）ごとに一定。需要区間を、勤務の始業・終業の境で基本区間に分け、基本区間ごとに1制約にする
     （[a_j, b_j) はその基本区間そのもの。統合しないので、診断の説明の時間帯は実際の制約の区間と常に一致する）。
-    そのうえで支配除去: C_i ⊂ C_j かつ r_i ≥ r_j なら j は冗長。"""
+    そのうえで支配除去: C_i ⊂ C_j かつ r_i ≥ r_j なら j は冗長。
+
+    Args:
+        I: 入力データ。
+        d: 計画日。
+
+    Returns:
+        `(C_j, r_j, a_j, b_j)` のリスト。`C_j` は区間を覆う `(日オフセット, 勤務)` の集合、`r_j` は必要人数、`[a_j, b_j)` は基本区間。"""
     W = [s for s, sd in enumerate(I.shifts) if sd.is_work]
     segs = [(off, s, I.shifts[s].start + off * DAY, I.shifts[s].end + off * DAY)
             for off in (-1, 0) for s in W]
@@ -87,7 +119,14 @@ def cover_spans(I: Instance, d: int) -> list[tuple[frozenset, int, int, int]]:
 
 
 def cover_intervals(I: Instance, d: int) -> list[tuple[frozenset, int]]:
-    """日 d の人数制約 (C_j, r_j) の列（cover_spans から時間帯を除いたもの）"""
+    """日 d の人数制約 (C_j, r_j) の列（cover_spans から時間帯を除いたもの）
+
+    Args:
+        I: 入力データ。
+        d: 計画日。
+
+    Returns:
+        `(C_j, r_j)` のリスト。"""
     return [(C, r) for C, r, _, _ in cover_spans(I, d)]
 
 
@@ -96,7 +135,14 @@ def symmetry_classes(I: Instance, mode: str) -> list[list[int]]:
 
     - `exact`: 取れる値・公休数・資格・夜勤専従・閾値・履歴・固定割当・希望休がすべて一致（入れ替えが解の対称性になる。健全）
     - `relaxed`: 取れる値・公休数・資格・夜勤専従・閾値のみ一致（履歴・固定割当・希望休の違いは無視。入れ替えは
-      厳密な対称性ではないため、解を取りこぼす可能性がある不完全な絞り込み）"""
+      厳密な対称性ではないため、解を取りこぼす可能性がある不完全な絞り込み）
+
+    Args:
+        I: 入力データ。
+        mode: `"exact"`（完全に同種）または `"relaxed"`（属性が近い者）。
+
+    Returns:
+        同値類（看護師の添字のリスト）のリスト。大きさ 2 以上のものだけ。"""
     groups: dict[tuple, list[int]] = {}
     for n in range(I.n_nurses):
         key = (tuple(I.domain[n]), I.off_days[n], n in I.seniors, n in I.night_only, inclusion_threshold(I, n))
@@ -109,7 +155,14 @@ def symmetry_classes(I: Instance, mode: str) -> list[list[int]]:
 
 
 def precheck(I: Instance, eps=None) -> list[str]:
-    """L0: 必要条件の集計検査（区間ごとに、覆える値を持ち当日が固定休でない人数 ≥ r_j）。eps は互換のため受け取る"""
+    """L0: 必要条件の集計検査（区間ごとに、覆える値を持ち当日が固定休でない人数 ≥ r_j）。eps は互換のため受け取る
+
+    Args:
+        I: 入力データ。
+        eps: 互換のために受け取る（使わない）。
+
+    Returns:
+        問題の文のリスト。空なら必要条件を満たす（区間ごとに、覆える人数が要求数以上）。"""
     msg = []
     for d in range(I.n_days):
         for C, r in cover_intervals(I, d):

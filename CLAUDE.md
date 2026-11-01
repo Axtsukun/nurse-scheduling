@@ -26,7 +26,7 @@ bench_*.py              # 計測スクリプト
 docs/legal/             # 法令・基準の調査（制約の根拠）
 docs/design/            # 設計の仕様（constraint-message-spec.md、クラス図 class-diagram.md。構成を変えたら README 3.4 の表と図も直す）
 docs/notes/             # 作業メモ（次のタスクの準備 next-tasks.md。状況に応じて更新する）
-mkdocs.yml, tools/mkdocs_hooks.py, .github/workflows/docs-site.yml  # ドキュメントサイト（README と docs/ を MkDocs でビルド。**GitHub Pages へは公開しない**（private のまま。決定事項）。notes/ は載せない。API リファレンスは docs/api/（`::: モジュール名`）を docstring から生成する。モジュールを足したら docs/api/ のページと nav も足す。docstring は Markdown として表示される: 公開の関数・クラスには必ず書く、リスト・表の前に空行を入れる、`A[n][d]` のような角括弧はバッククォートで囲む、クラスの項目の説明は行末コメントに書く（詳細は README 4.7。tests/test_docs.py が検査する）。文書を足したら mkdocs.yml の nav にも足す。`mkdocs build --strict` が通ること）
+mkdocs.yml, tools/mkdocs_hooks.py, .github/workflows/docs-site.yml  # ドキュメントサイト（README と docs/ を MkDocs でビルド。**GitHub Pages へは公開しない**（private のまま。決定事項）。notes/ は載せない。API リファレンスは docs/api/（`::: モジュール名`）を docstring から生成する。モジュールを足したら docs/api/ のページと nav も足す。docstring は Markdown として表示される: 公開の関数・クラスには必ず書く、引数がある関数は `Args:`・値を返す関数は `Returns:` の節も書く（内部関数も。Google 形式）、リスト・表の前に空行を入れる、`A[n][d]` のような角括弧はバッククォートで囲む、クラスの項目の説明は行末コメントに書く（詳細は README 4.7。tests/test_docs.py が検査する）。文書を足したら mkdocs.yml の nav にも足す。`mkdocs build --strict` が通ること）
 tests/
 ```
 
