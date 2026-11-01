@@ -1,0 +1,3 @@
+# `nurse.message`
+
+::: nurse.message

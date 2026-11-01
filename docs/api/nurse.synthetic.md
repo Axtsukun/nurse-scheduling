@@ -1,0 +1,3 @@
+# `nurse.synthetic`
+
+::: nurse.synthetic

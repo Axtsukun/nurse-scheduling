@@ -12,8 +12,8 @@ from .registry import REGISTRY, ConstraintSpec, Item, Aux, Named, constraint, se
 class ModelKernel:
     """決定変数 x[n,t,s]（s ∈ D_n のみ生成する疎な形）を保持する。
     D_n = S_n ∪ {固定割当・履歴に現れる値}
-    識別子: self.xv[n] … 看護師 n の boolvar 配列 shape=(H+T, |D_n|)
-            self.col[n][s] … 値 s の列番号、 self.dom[n] … D_n（昇順リスト）
+    識別子: `self.xv[n]` … 看護師 n の boolvar 配列 shape=(H+T, |D_n|)
+            `self.col[n][s]` … 値 s の列番号、 `self.dom[n]` … D_n（昇順リスト）
             self.active … build() で有効になった制約名（他の制約の前提を確かめるために使う）"""
 
     def __init__(self, I: Instance, eps: Eps):

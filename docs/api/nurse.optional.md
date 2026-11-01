@@ -1,0 +1,3 @@
+# `nurse.optional`
+
+::: nurse.optional

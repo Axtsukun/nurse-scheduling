@@ -1,0 +1,3 @@
+# `nurse.domain`
+
+::: nurse.domain

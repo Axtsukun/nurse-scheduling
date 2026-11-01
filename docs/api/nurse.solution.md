@@ -1,0 +1,3 @@
+# `nurse.solution`
+
+::: nurse.solution

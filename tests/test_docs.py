@@ -175,3 +175,38 @@ def test_class_diagram_matches_the_code():
                 problems.append(f"図{fi}: {name} の列挙値 図={listed} コード={actual}")
     assert checked > 30, f"照合できたクラス・モジュールが少なすぎる（{checked}）"
     assert not problems, "\n" + "\n".join(problems)
+
+
+# ---- ドキュメントサイト（MkDocs。公開はしない） ----
+def test_pages_site_builds_without_warnings(tmp_path):
+    """mkdocs.yml のとおりにサイトが警告なしでビルドでき、README が index になり、作業メモが載らない。
+    （MkDocs が無い環境ではスキップ。CI のワークフローも同じ --strict ビルドを行う）"""
+    import subprocess
+    pytest = importlib.import_module("pytest")
+    pytest.importorskip("mkdocs")
+    pytest.importorskip("material")
+    site = tmp_path / "site"
+    r = subprocess.run([sys.executable, "-m", "mkdocs", "build", "--strict", "-d", str(site)],
+                       cwd=ROOT, capture_output=True, text=True, env={**__import__("os").environ, "NO_MKDOCS_2_WARNING": "1"})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "ナーススケジューリング CSP エンジン" in (site / "index.html").read_text(encoding="utf-8")
+    assert not (site / "notes").exists()
+    # 掲載対象の文書にある Mermaid の図が、すべて mermaid ブロックとして出力される
+    sources = [ROOT / "README.md", *(p for p in (ROOT / "docs").rglob("*.md") if "notes" not in p.relative_to(ROOT / "docs").parts)]
+    expected = sum(p.read_text(encoding="utf-8").count("```mermaid") for p in sources)
+    n = sum(p.read_text(encoding="utf-8").count('class="mermaid"') for p in site.rglob("index.html"))
+    assert n == expected > 0, (n, expected)
+
+
+def test_api_reference_covers_every_module():
+    """API リファレンス（docs/api/）が、全モジュールを漏れなく載せ、mkdocs.yml の nav にも入っていること。
+    モジュールを足したのにページを足し忘れると、ここで気づく。"""
+    modules = ["nurse_csp", "verify", "evaluate", "nurse"] + [f"nurse.{p.stem}" for p in PKG.glob("*.py") if p.stem != "__init__"]
+    nav = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+    for m in modules:
+        page = ROOT / "docs/api" / f"{m}.md"
+        assert page.exists(), f"{m}: docs/api/{m}.md がない"
+        assert f"::: {m}\n" in page.read_text(encoding="utf-8"), f"{m}: ページに ::: {m} がない"
+        assert f"api/{m}.md" in nav, f"{m}: mkdocs.yml の nav にない"
+    extra = {p.stem for p in (ROOT / "docs/api").glob("*.md")} - set(modules) - {"index"}
+    assert not extra, f"存在しないモジュールのページ: {extra}"
