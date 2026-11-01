@@ -1,0 +1,3 @@
+# `nurse.model`
+
+::: nurse.model

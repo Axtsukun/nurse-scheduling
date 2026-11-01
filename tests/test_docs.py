@@ -196,3 +196,17 @@ def test_pages_site_builds_without_warnings(tmp_path):
     expected = sum(p.read_text(encoding="utf-8").count("```mermaid") for p in sources)
     n = sum(p.read_text(encoding="utf-8").count('class="mermaid"') for p in site.rglob("index.html"))
     assert n == expected > 0, (n, expected)
+
+
+def test_api_reference_covers_every_module():
+    """API リファレンス（docs/api/）が、全モジュールを漏れなく載せ、mkdocs.yml の nav にも入っていること。
+    モジュールを足したのにページを足し忘れると、ここで気づく。"""
+    modules = ["nurse_csp", "verify", "evaluate", "nurse"] + [f"nurse.{p.stem}" for p in PKG.glob("*.py") if p.stem != "__init__"]
+    nav = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+    for m in modules:
+        page = ROOT / "docs/api" / f"{m}.md"
+        assert page.exists(), f"{m}: docs/api/{m}.md がない"
+        assert f"::: {m}\n" in page.read_text(encoding="utf-8"), f"{m}: ページに ::: {m} がない"
+        assert f"api/{m}.md" in nav, f"{m}: mkdocs.yml の nav にない"
+    extra = {p.stem for p in (ROOT / "docs/api").glob("*.md")} - set(modules) - {"index"}
+    assert not extra, f"存在しないモジュールのページ: {extra}"

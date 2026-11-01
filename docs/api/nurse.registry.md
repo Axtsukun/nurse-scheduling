@@ -1,0 +1,3 @@
+# `nurse.registry`
+
+::: nurse.registry

@@ -1,0 +1,3 @@
+# `nurse.solver`
+
+::: nurse.solver

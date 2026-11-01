@@ -1,6 +1,6 @@
 """解（割当表）の読み取り用の部品。検証器と評価が共通に使う。モデルの式には依存しない。
 
-  A[n][d] = 計画日 d に看護師 n が就く勤務の添字 s（𝒮 の添字）
+  `A[n][d]` = 計画日 d に看護師 n が就く勤務の添字 s（𝒮 の添字）
 """
 from __future__ import annotations
 from .instance import Instance, DAY

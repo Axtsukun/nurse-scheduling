@@ -4,7 +4,7 @@ name: Docs site
 on:
   pull_request:
     branches: [develop, main]
-    paths: ['README.md', 'docs/**', 'mkdocs.yml', 'tools/mkdocs_hooks.py', 'requirements-docs.txt', '.github/workflows/docs-site.yml']
+    paths: ['README.md', 'docs/**', 'nurse/**', '*.py', 'mkdocs.yml', 'tools/mkdocs_hooks.py', 'requirements-docs.txt', '.github/workflows/docs-site.yml']
   push:
     branches: [develop, main]
   workflow_dispatch:

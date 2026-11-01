@@ -4,7 +4,7 @@
 実装は `nurse/` パッケージにある（構成は nurse/__init__.py と CLAUDE.md を参照）。このモジュールは
 `import nurse_csp as m` で全ての公開 API を使えるようにする互換の窓口と、合成インスタンス1問の求解 CLI を持つ。
 
-使い方:  python nurse_csp.py [--lin 0|1|2] [--time-limit 秒] [--mus-time-limit 秒] [--properties パス]
+使い方:  python nurse_csp.py `[--lin 0|1|2] [--time-limit 秒] [--mus-time-limit 秒] [--properties パス]`
          （評価は evaluate.py。時間制限の既定は nurse.properties）
 
 終了コード（nurse/codes.py の ReturnCode）:

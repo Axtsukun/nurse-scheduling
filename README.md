@@ -33,7 +33,7 @@ pip install -r requirements.txt                        # cpmpy, ortools, exact, 
 
 python nurse_csp.py            # 合成インスタンス（30人・30日）を1問求解し、勤務表の先頭を表示
 python evaluate.py             # 求解 → 独立検証 → 評価（人数・勤務回数・72時間・土日・要望）を表示
-pytest -q                      # 全テスト（117件、約1分40秒）
+pytest -q                      # 全テスト（118件、約1分40秒）
 ```
 
 どちらのスクリプトも `--lin`（`linearization_level`）と `--time-limit` を取る。`evaluate.py --requests 0.10` で個別要望を全セルの1割だけ加える。
@@ -82,7 +82,7 @@ nurse-scheduling/
 │   ├── test_named.py       制約の名前（ID・クラス名・メッセージ・遅延生成・全群の一覧）  16件
 │   ├── test_message.py     整形器（日付・時刻・範囲・名前・パラメータ）と表示方針の検査  11件
 │   ├── test_solve.py       求解 + 独立検証（制約を1つずつ外す求解を含む）           7件
-│   ├── test_docs.py        README の依存表・依存図とクラス図が、コードと一致すること・ドキュメントサイトがビルドできること  5件
+│   ├── test_docs.py        README の依存表・依存図とクラス図が、コードと一致すること・ドキュメントサイトがビルドできること・API 文書が全モジュールを載せること  6件
 │   ├── test_config.py      設定ファイル（properties）とリターンコード・例外・CLI の終了コード  17件
 │   ├── test_diagnose.py    診断（時間切れ / 制約矛盾 / 前提同士の矛盾 / MUS が極小 / MUS の時間制限）  13件
 │   └── test_evaluate.py    評価の集計が解と整合すること                              3件
@@ -91,6 +91,7 @@ nurse-scheduling/
 │   ├── constraint-message-spec.md  制約名・メッセージの仕様
 │   └── class-diagram.md    クラス図（コア部分: IF・データモデル・数理モデル・求解エンジン）
 ├── docs/notes/             作業メモ（次のタスクの準備、調査結果、検討資料。サイトには載せない）
+├── docs/api/               API リファレンス（モジュールごとに `::: モジュール名` だけを書く。中身は docstring から生成）
 ├── mkdocs.yml, tools/mkdocs_hooks.py, requirements-docs.txt, .github/workflows/docs-site.yml
 │                           ドキュメントサイト（README と docs/ をそのまま MkDocs でビルド。公開しない。4.7 節）
 │
@@ -480,7 +481,7 @@ MUS の求め方:
 
 ### 4.7 ドキュメントサイト（MkDocs。公開はしない）
 
-README と `docs/design/`・`docs/legal/` を、MkDocs（Material テーマ）で1つのサイトにする。本文は今の Markdown をそのまま使い、サイト用の複製はない（README は `tools/mkdocs_hooks.py` がトップページとして組み込む）。作業メモ（`docs/notes/`）は載せない。
+README と `docs/design/`・`docs/legal/`、および **Python の API リファレンス**（`docs/api/`）を、MkDocs（Material テーマ）で1つのサイトにする。API リファレンスはソースの docstring から自動生成する（`mkdocstrings`。ソースを実行せず構文解析で読むので、cpmpy 等を入れなくてもビルドできる）。docstring は Markdown として表示されるため、`A[n][d]` のような角括弧を含む記号は、バッククォートで囲む（囲まないと相互参照とみなされ、`--strict` が失敗する）。本文は今の Markdown をそのまま使い、サイト用の複製はない（README は `tools/mkdocs_hooks.py` がトップページとして組み込む）。作業メモ（`docs/notes/`）は載せない。
 
 ```bash
 pip install -r requirements-docs.txt
@@ -490,7 +491,8 @@ mkdocs build --strict         # _site/ に出力。警告があれば失敗す�
 
 - **公開しない（決定事項）**: リポジトリは private のまま。標準の GitHub Pages は private でも**サイトがインターネットに公開される**（アクセス制限は Enterprise Cloud のみ）ため、Pages の公開は設定しない。`.github/workflows/docs-site.yml` はビルド検証（`--strict`）と、サイトの zip（成果物 `docs-site`、30日保存）の保存だけを行い、閲覧にはリポジトリの読み取り権限が要る。
 - **公開したくなったとき**: Enterprise Cloud なら Pages のアクセス制御で private 公開できる。そうでなければ、ワークフローに `actions/upload-pages-artifact` と `actions/deploy-pages` のジョブを足し、Settings → Pages → Source を GitHub Actions にする。**足す前に公開範囲の確認が要る。**
-- **用語**: *MkDocs* = Markdown から静的サイトを作るツール。*Material* = その見た目のテーマ（Mermaid の図もこれで描画される）。*`--strict`* = 警告（リンク切れなど）もエラー扱いにするビルド。
+- **モジュールを足したとき**: `docs/api/<モジュール名>.md` に `# \`名前\`` と `::: 名前` を書き、`mkdocs.yml` の nav に足す（足し忘れは `tests/test_docs.py` が検出する）。
+- **用語**: *docstring* = 関数・クラスの先頭に書く説明文。*MkDocs* = Markdown から静的サイトを作るツール。*Material* = その見た目のテーマ（Mermaid の図もこれで描画される）。*`--strict`* = 警告（リンク切れなど）もエラー扱いにするビルド。
 
 ## 5. 制約を足すには
 
@@ -513,7 +515,7 @@ mkdocs build --strict         # _site/ に出力。警告があれば失敗す�
 | `test_solve.py` | 7 | する | 可解性と独立検証（`lin` 0/1）、層2・層3を1つずつ外した求解、休日の各規則、検証器が違反を検出すること |
 | `test_named.py` | 16 | しない | `build` と `build_named` が同じ式、全群の短い一意なクラス名、**ID が全制約で一意・群内で連続**、補助変数・背景はメッセージなし、全 soft 制約のメッセージ、**メッセージの遅延生成**、全群のメッセージの一覧（開始日あり・なし）、人数制約が基本区間・翌日 00:00 で表れること、仕様書 8 節の表が実装の出力と一致すること |
 | `test_message.py` | 11 | しない | 整形器: 日付（月・年またぎ、履歴の日）、時刻のゼロ埋め・翌日表記、時間帯の 24:00 → 翌日 00:00、看護師名・区分名、パラメータの書式、開始日と曜日の整合検査 |
-| `test_docs.py` | 5 | しない | README 3.4 の依存表・依存図が実際の `import` と一致し循環がないこと、`class-diagram.md` のクラス図のフィールド・操作・戻り値・列挙値がコードと一致すること、ドキュメントサイトが警告なしでビルドでき図がすべて出力されること（MkDocs が無ければスキップ） |
+| `test_docs.py` | 6 | しない | README 3.4 の依存表・依存図が実際の `import` と一致し循環がないこと、`class-diagram.md` のクラス図のフィールド・操作・戻り値・列挙値がコードと一致すること、ドキュメントサイトが警告なしでビルドでき図がすべて出力されること（MkDocs が無ければスキップ）、`docs/api/` が全モジュールを載せ nav に入っていること |
 | `test_config.py` | 17 | 一部 | properties の書式と不正（行番号つき）・読み込みの優先順位、時間制限が設定ファイルで変わること、リターンコード全種と例外の対応、CLI の終了コード |
 | `test_diagnose.py` | 13 | する | 時間切れは矛盾と区別、soft 単独の矛盾 / 前提に依存する矛盾 / **前提同士の矛盾**を日本語で説明、**MUS が充足不能かつ極小**（1件外せば解ける）、ソルバー選択（求解 CP-SAT・MUS exact）の固定、MUS ソルバー未導入時にエラーになること、**MUS の時間制限**（時間内に終われば最小 / 終わらなければ事前候補を返す / 事前候補も取れなければ特定不能） |
 | `test_evaluate.py` | 3 | する | 評価の集計が解と整合、土日勤務日数のばらつき上限 |

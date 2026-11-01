@@ -1,0 +1,3 @@
+# `nurse.law`
+
+::: nurse.law

@@ -37,6 +37,27 @@ nav:
   - 設計:
       - クラス図: design/class-diagram.md
       - 制約メッセージの仕様: design/constraint-message-spec.md
+  - API リファレンス:
+      - 概要: api/index.md
+      - nurse_csp: api/nurse_csp.md
+      - verify: api/verify.md
+      - evaluate: api/evaluate.md
+      - nurse: api/nurse.md
+      - nurse.codes: api/nurse.codes.md
+      - nurse.config: api/nurse.config.md
+      - nurse.diagnosis: api/nurse.diagnosis.md
+      - nurse.domain: api/nurse.domain.md
+      - nurse.instance: api/nurse.instance.md
+      - nurse.kernel: api/nurse.kernel.md
+      - nurse.law: api/nurse.law.md
+      - nurse.message: api/nurse.message.md
+      - nurse.model: api/nurse.model.md
+      - nurse.optional: api/nurse.optional.md
+      - nurse.preprocess: api/nurse.preprocess.md
+      - nurse.registry: api/nurse.registry.md
+      - nurse.solution: api/nurse.solution.md
+      - nurse.solver: api/nurse.solver.md
+      - nurse.synthetic: api/nurse.synthetic.md
   - 法令・基準:
       - 調査の概要: legal/README.md
       - 01 労働基準法等: legal/01_law.md
@@ -44,6 +65,18 @@ nav:
       - 03 ガイドライン: legal/03_guidelines.md
       - 04 モデルとの対応: legal/04_model_mapping.md
       - 05 出典と未確認事項: legal/05_sources_and_gaps.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]          # ソースを実行せず構文解析で読む（cpmpy 等の依存は不要）
+          options:
+            docstring_style: null     # docstring は日本語の自由文。Markdown としてそのまま表示する
+            members_order: source
+            show_root_heading: true
+            show_source: false
 
 markdown_extensions:
   - tables

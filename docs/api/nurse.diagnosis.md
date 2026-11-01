@@ -1,0 +1,3 @@
+# `nurse.diagnosis`
+
+::: nurse.diagnosis

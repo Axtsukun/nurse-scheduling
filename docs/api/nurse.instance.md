@@ -1,0 +1,3 @@
+# `nurse.instance`
+
+::: nurse.instance
