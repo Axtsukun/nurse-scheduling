@@ -1,3 +1,1 @@
-# `nurse.preprocess`
-
 ::: nurse.preprocess

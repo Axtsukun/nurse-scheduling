@@ -1,23 +1,25 @@
-"""
-解けないときの診断。原因は2つに分けて扱う:
-  - 時間切れ … 解も、解が無い証明も得られなかった（制約矛盾かどうかは不明）
-  - 制約矛盾 … 解が無いと証明できた。同時には成り立たない最小の制約の集合（MUS）を日本語で説明する
+"""解けないときの診断。原因は2つに分けて扱う:
 
-MUS（極小充足不能部分集合）の求め方
-  - cpmpy.tools.mus を、PB ソルバー exact で使う（決定事項。実測で CP-SAT より速い。README 4.5 節）。
-    求解は CP-SAT（solver.SOLVE_SOLVER）、MUS は exact（MUS_SOLVER）と決めており、切り替えの自動化はしない。
-  - 制約を hard と soft に分けて渡す（hard は仮定を持たないので、soft だけが絞り込みの対象になり速い）。
-      背景 … 構造・履歴・補助変数の定義（relaxable=False の群と Aux）。常に成り立たせる
-      前提 … カーネル・層1の制約（固定割当・労基法の休日）。scope が MANDATORY = オフにできない
-      soft … 層2・層3の制約（scope が TOGGLEABLE = 外せる）。矛盾の説明の主役
-  - 一段階で求める（制約群を単位にした先行の絞り込みは、実測で一段階より遅かったので採用しない）。
-  - 時間制限（mus_time_limit）: cpmpy.tools.mus 自体には時間制限がなく、極端な矛盾では戻らない。そこで
-      ① 事前候補: MUS の前に、仮定つきの求解 1 回で矛盾の集合（コア。最小とは限らない）を取る。
-      ② mus を子プロセスで実行し、mus_time_limit 秒で打ち切る。終われば最小（minimal=True）。
-      ③ 打ち切ったら、①の事前候補を結果にする（minimal=False。矛盾する集合だが、不要な制約を含む可能性がある）。
-    ①が時間内に終わらなければ、矛盾は確定しているが原因の制約は特定できない（items が空、minimal=False）。
-  - CPMpy は制約式に名前を付けられないので、式の id から Named（制約群・日本語ラベル）を引き戻す。
-"""
+- **時間切れ** … 解も、解が無い証明も得られなかった（制約矛盾かどうかは不明）
+- **制約矛盾** … 解が無いと証明できた。同時には成り立たない最小の制約の集合（MUS）を日本語で説明する
+
+## MUS（極小充足不能部分集合）の求め方
+
+- `cpmpy.tools.mus` を、PB ソルバー exact で使う（決定事項。実測で CP-SAT より速い。README 4.5 節）。
+  求解は CP-SAT（`solver.SOLVE_SOLVER`）、MUS は exact（`MUS_SOLVER`）と決めており、切り替えの自動化はしない。
+- 制約を hard と soft に分けて渡す（hard は仮定を持たないので、soft だけが絞り込みの対象になり速い）:
+    - **背景** … 構造・履歴・補助変数の定義（`relaxable=False` の群と Aux）。常に成り立たせる
+    - **前提** … カーネル・層1の制約（固定割当・労基法の休日）。scope が MANDATORY = オフにできない
+    - **soft** … 層2・層3の制約（scope が TOGGLEABLE = 外せる）。矛盾の説明の主役
+- 一段階で求める（制約群を単位にした先行の絞り込みは、実測で一段階より遅かったので採用しない）。
+- 時間制限（`mus_time_limit`）: `cpmpy.tools.mus` 自体には時間制限がなく、極端な矛盾では戻らない。そこで:
+    1. **事前候補**: MUS の前に、仮定つきの求解 1 回で矛盾の集合（コア。最小とは限らない）を取る。
+    2. `mus` を子プロセスで実行し、`mus_time_limit` 秒で打ち切る。終われば最小（`minimal=True`）。
+    3. 打ち切ったら、1. の事前候補を結果にする（`minimal=False`。矛盾する集合だが、不要な制約を含む可能性がある）。
+
+    事前候補（1.）が時間内に終わらなければ、矛盾は確定しているが原因の制約は特定できない（`items` が空、`minimal=False`）。
+
+- CPMpy は制約式に名前を付けられないので、式の id から Named（制約群・日本語ラベル）を引き戻す。"""
 from __future__ import annotations
 from dataclasses import dataclass, field
 import multiprocessing
@@ -39,7 +41,7 @@ SCOPE_NAMES = {"core": "カーネル", "law": "層1 労働法規", "domain": "�
 @dataclass
 class Diagnosis:
     """診断の結果。status は FEASIBLE / TIMEOUT / CONFLICT のいずれか"""
-    status: str
+    status: str      # FEASIBLE / TIMEOUT / CONFLICT
     detail: str = ""                                          # ソルバーの状態など
     items: list[Named] = field(default_factory=list)          # CONFLICT: MUS を構成する個別の制約（定義順）
     hard_only: bool = False                                   # CONFLICT: True ならオフにできない制約（前提）同士の矛盾
@@ -150,14 +152,26 @@ def _check(exprs: list, time_limit: float) -> str:
 def diagnose(I: Instance, eps: Eps, time_limit: float | None = None, mus_solver: str = MUS_SOLVER,
              mus_time_limit: float | None = None) -> Diagnosis:
     """解けるか調べ、解けなければ原因（時間切れ / 制約矛盾）を返す。
+
+    手順:
+
     1. 通常のモデルを求解用のソルバー（CP-SAT）で解く。解ければ FEASIBLE、時間切れなら TIMEOUT（矛盾かどうかは不明）。
-    2. 実行不能と確定したときだけ MUS を求める（指示変数つきのモデルは桁違いに遅いので、解ける問題では解かない）。
-       a. 背景と前提（カーネル・層1）だけで矛盾するなら、前提の中から MUS（hard_only=True。入力データと法令の矛盾）。
-       b. そうでなければ、前提を hard として固定し、soft（層2・層3）の MUS を求め、
-          その矛盾に関わる前提（例: 固定割当）を追加で絞り込む。
-    MUS は mus_time_limit 秒（soft と前提でそれぞれ）で打ち切る。打ち切ると、事前候補（最小とは限らない矛盾の集合）を
-    返し、minimal=False にする。time_limit・mus_time_limit を省略すると nurse.properties の値（既定は各30秒）を使う。
-    結果のリターンコードは Diagnosis.code（nurse/codes.py）。"""
+    2. 実行不能と確定したときだけ MUS を求める（指示変数つきのモデルは桁違いに遅いので、解ける問題では解かない）:
+        - 背景と前提（カーネル・層1）だけで矛盾するなら、前提の中から MUS を求める（`hard_only=True`。入力データと法令の矛盾）。
+        - そうでなければ、前提を hard として固定し、soft（層2・層3）の MUS を求め、その矛盾に関わる前提（例: 固定割当）を追加で絞り込む。
+
+    MUS は `mus_time_limit` 秒（soft と前提でそれぞれ）で打ち切る。打ち切ると、事前候補（最小とは限らない矛盾の集合）を
+    返し、`minimal=False` にする。
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        time_limit: 通常の求解の時間制限（秒）。省略すると nurse.properties の `solve.time_limit`（既定30秒）。
+        mus_solver: MUS を求めるソルバー。既定は `MUS_SOLVER`（exact）。
+        mus_time_limit: MUS 1回あたりの時間制限（秒）。省略すると nurse.properties の `mus.time_limit`（既定30秒）。
+
+    Returns:
+        診断結果。リターンコードは `Diagnosis.code`（nurse/codes.py）。"""
     cfg = load_settings()
     time_limit = cfg.solve_time_limit if time_limit is None else time_limit
     mus_time_limit = cfg.mus_time_limit if mus_time_limit is None else mus_time_limit

@@ -12,6 +12,7 @@ from .preprocess import rest_cliques, symmetry_classes
 class OptionalConstraints(ModelKernel):
 
     # ---- 系列（ガイドライン） ----
+    """層3（optional）の制約。努力義務・ガイドライン・個別要望。`Rules.off` でオフにできる。`ModelKernel` を継承したミックスイン。"""
     @constraint("rest", "L2", scope="optional", source=("GL-INTERVAL-LAW", "GL-REST-11H"), title="勤務間隔下限")
     def c_rest(self):
         """勤務間隔 ρ（閾値分解）: Σ_{a∈A_θ} x[n,t,a] + Σ_{b∈B_θ} x[n,t+1,b] ≤ 1"""

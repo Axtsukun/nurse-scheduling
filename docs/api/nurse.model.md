@@ -1,3 +1,1 @@
-# `nurse.model`
-
 ::: nurse.model

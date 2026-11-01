@@ -1,3 +1,1 @@
-# `nurse.kernel`
-
 ::: nurse.kernel

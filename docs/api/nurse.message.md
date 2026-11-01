@@ -1,3 +1,1 @@
-# `nurse.message`
-
 ::: nurse.message

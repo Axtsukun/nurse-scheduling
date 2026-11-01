@@ -1,17 +1,17 @@
-"""
-入力データ・層ごとのパラメータ・インスタンスへの単純な問い合わせ。
+"""入力データ・層ごとのパラメータ・インスタンスへの単純な問い合わせ。
 ソルバーにも制約式にも依存しない（このモジュールは cpmpy を import しない）。
 
 時刻: 30分単位の整数。0 = 当日 0:00、48 = 翌日 0:00。勤務は開始する暦日 d に属し、
-      [start, end) が 48 を超えれば翌日にかかる（深夜 0:30 開始は当日の start=1）。
+`[start, end)` が 48 を超えれば翌日にかかる（深夜 0:30 開始は当日の start=1）。
 
-層構成（docs/legal/ と CLAUDE.md を参照）
-  カーネル     : 変数 x・窓の部品・登録の仕組み（常に有効）
-  層1 law      : 労働法規（オフにできない。値は法令の選択肢）
-  層2 domain   : 病院・看護職共通（診療報酬の施設基準など。病院の判断でオン・オフ・値の調整）
-  層3 optional : 努力義務・ガイドライン・個別要望（クライアントが選ぶ）
-上の層の制約は下の層の制約に「加える」（論理積）ので、下の層を弱めることはない。
-"""
+層構成（docs/legal/ と CLAUDE.md を参照）:
+
+- **カーネル**: 変数 x・窓の部品・登録の仕組み（常に有効）
+- **層1 law**: 労働法規（オフにできない。値は法令の選択肢）
+- **層2 domain**: 病院・看護職共通（診療報酬の施設基準など。病院の判断でオン・オフ・値の調整）
+- **層3 optional**: 努力義務・ガイドライン・個別要望（クライアントが選ぶ）
+
+上の層の制約は下の層の制約に「加える」（論理積）ので、下の層を弱めることはない。"""
 from __future__ import annotations
 import math
 from dataclasses import dataclass, field
@@ -30,11 +30,11 @@ HOLIDAY_4W4D = "4w4d"                       # 労基法35条2項: 4週間で4日
 @dataclass(frozen=True)
 class ShiftDef:
     """勤務の値 s ∈ 𝒮 の定義（数式: start_s, end_s, k(s), work_s）"""
-    name: str
+    name: str                  # 勤務の名前
     start: int                 # start_s（30分単位, 当日0:00起点）
-    end: int                   # end_s
+    end: int                   # end_s（`[start, end)` の end。48 を超えれば翌日にかかる）
     cat: str                   # 区分 k(s): "D"日勤帯 "E"準夜帯 "N"深夜帯 "P"パート "OFF"公休 "LV"有休等
-    is_work: bool              # work_s
+    is_work: bool              # work_s（勤務として数える値か）
     fixed_only: bool = False   # 入力で固定された日にのみ取れる値（有休・研修など）
 
 
@@ -65,7 +65,7 @@ class DomainParams:
     budget_units: int = 0                  # q（届出単位での配分枠）
     admission_class: str = "7:1"           # 入院基本料の区分: incl_slots のキー
     # 72時間ルールの算入閾値 θ（スロット数、「未満」は除外）。7対1・10対1は16h、その他は8h
-    incl_slots: dict[str, int] = field(default_factory=lambda: {"7:1": 32, "10:1": 32, "other": 16})
+    incl_slots: dict[str, int] = field(default_factory=lambda: {"7:1": 32, "10:1": 32, "other": 16})  # 区分 → 算入閾値 θ（スロット数）
     short_time_slots: int = 24             # 短時間正職員の閾値（12h）
 
     def __post_init__(self):
@@ -81,18 +81,18 @@ class DomainParams:
 class GuidelineParams:
     """層3: 努力義務・ガイドライン（docs/legal/03_guidelines.md）"""
     min_rest: int = 22                     # 勤務間隔の下限 ρ（11h）
-    max_consec_work: int = 5               # K
+    max_consec_work: int = 5               # K（連続勤務日数の上限）
     min_off_block: int = 1                 # m（2以上で単発休を禁止）
-    max_work_weekends: int = 3             # W
+    max_work_weekends: int = 3             # W（勤務する週末の数の上限）
 
 
 @dataclass(frozen=True)
 class Rules:
     """病院ごとのプロファイル。off は層2・層3でオフにする制約名（層1・カーネルは指定不可。検査は registry）"""
-    law: LawParams = field(default_factory=LawParams)
-    domain: DomainParams = field(default_factory=DomainParams)
-    guideline: GuidelineParams = field(default_factory=GuidelineParams)
-    off: frozenset[str] = frozenset()
+    law: LawParams = field(default_factory=LawParams)                    # 層1の選択肢
+    domain: DomainParams = field(default_factory=DomainParams)           # 層2のパラメータ
+    guideline: GuidelineParams = field(default_factory=GuidelineParams)  # 層3のパラメータ
+    off: frozenset[str] = frozenset()                                    # オフにする制約名（層2・層3のみ）
 
 
 def _delegate(layer: str, attr: str) -> property:
@@ -103,9 +103,11 @@ def _delegate(layer: str, attr: str) -> property:
 
 @dataclass
 class Instance:
+    """解く問題の入力データ全体。看護師・勤務の値・日数・前月末の履歴・需要・各層のパラメータ・個別要望を持つ。
+    制約はここから値を読む。項目ごとの説明と、対応する数式の記号は下の各項目を参照。"""
     shifts: list[ShiftDef]                 # 𝒮（添字 s は list の位置）
     domain: list[list[int]]                # S_n ⊆ 𝒮（看護師 n が取れる値）
-    n_days: int                            # T
+    n_days: int                            # 計画日数 T
     start_weekday: int                     # 計画日0の曜日（0=月）
     history: np.ndarray                    # [n, H] 前月末の勤務 h_{n,t}（値は 𝒮 の添字）
     demand: list[list[tuple[int, int, int]]]  # 日 d の需要区間（番）(a, b, r)：[a,b) に r 人以上。番ごとに一定で、1日（0〜48）を空きなく覆う。需要なしは r=0
@@ -152,17 +154,18 @@ class Instance:
                 raise InputError(f"demand[{d}] が {DAY} まで覆っていない（{pos} で終わる）。需要なしの時間帯は r=0 で明示する")
 
     # 層パラメータへの委譲（制約・検証器・テストはこの名前で参照する）
-    min_rest = _delegate("guideline", "min_rest")
-    max_consec_work = _delegate("guideline", "max_consec_work")
-    min_off_block = _delegate("guideline", "min_off_block")
-    max_work_weekends = _delegate("guideline", "max_work_weekends")
-    night_window = _delegate("domain", "night_window")
-    handover = _delegate("domain", "handover")
-    limit_units = _delegate("domain", "limit_units")
-    budget_units = _delegate("domain", "budget_units")
+    min_rest = _delegate("guideline", "min_rest")  # rules.guideline.min_rest への委譲
+    max_consec_work = _delegate("guideline", "max_consec_work")  # rules.guideline.max_consec_work への委譲
+    min_off_block = _delegate("guideline", "min_off_block")  # rules.guideline.min_off_block への委譲
+    max_work_weekends = _delegate("guideline", "max_work_weekends")  # rules.guideline.max_work_weekends への委譲
+    night_window = _delegate("domain", "night_window")  # rules.domain.night_window への委譲
+    handover = _delegate("domain", "handover")  # rules.domain.handover への委譲
+    limit_units = _delegate("domain", "limit_units")  # rules.domain.limit_units への委譲
+    budget_units = _delegate("domain", "budget_units")  # rules.domain.budget_units への委譲
 
     @property
     def n_nurses(self) -> int:
+        """看護師数 N"""
         return len(self.domain)
 
     @property

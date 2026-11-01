@@ -1,17 +1,20 @@
-"""
-設定ファイル（Java 形式の properties）。時間制限を、コードを変えずに変更できるようにする。
+"""設定ファイル（Java 形式の properties）。時間制限を、コードを変えずに変更できるようにする。
 
-  # nurse.properties
-  solve.time_limit = 30     # 求解の時間制限（秒）
-  mus.time_limit = 30       # MUS（矛盾の原因の絞り込み）1回あたりの時間制限（秒）
+```properties
+# nurse.properties
+solve.time_limit = 30     # 求解の時間制限（秒）
+mus.time_limit = 30       # MUS（矛盾の原因の絞り込み）1回あたりの時間制限（秒）
+```
 
 読み込む場所（先に見つかったもの）:
-  1. 関数に渡したパス（load_settings(path)。CLI の --properties）。ファイルが無ければ InputError
-  2. 環境変数 NURSE_PROPERTIES のパス。ファイルが無ければ InputError
-  3. リポジトリ直下の nurse.properties。無ければ既定値（下の Settings）
+
+1. 関数に渡したパス（`load_settings(path)`。CLI の `--properties`）。ファイルが無ければ InputError
+2. 環境変数 `NURSE_PROPERTIES` のパス。ファイルが無ければ InputError
+3. リポジトリ直下の `nurse.properties`。無ければ既定値（下の Settings）
+
 書式: `キー=値`（空白は無視）。`#` か `!` で始まる行と空行はコメント。未知のキー・重複・正でない数・数でない値は InputError。
-solve() と diagnose() は、time_limit / mus_time_limit を省略したときにこの設定を使う（引数で渡せば引数が優先）。
-"""
+
+`solve()` と `diagnose()` は、time_limit / mus_time_limit を省略したときにこの設定を使う（引数で渡せば引数が優先）。"""
 from __future__ import annotations
 import os
 from dataclasses import dataclass
