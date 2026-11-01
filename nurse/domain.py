@@ -57,7 +57,15 @@ class DomainConstraints(ModelKernel):
     def _night_hour_bounds(self, n: int, S: list[int], u: dict[int, int]) -> tuple[int, int]:
         """h_n の下界 LB_n・上界 UB_n（算入の事前判定に使う。解に対して常に成り立つ値でなければならない）。
         夜勤可能な看護師で night_band が有効なときだけ、夜勤回数の帯 [lo,hi] から導いた締まった界を使う。
-        night_band がオフなら夜勤 0 回もありえるので、帯を前提にしない自明な界にする。"""
+        night_band がオフなら夜勤 0 回もありえるので、帯を前提にしない自明な界にする。
+
+        Args:
+            n: 看護師の添字。
+            S: その看護師が取れる、夜勤時間が正の勤務の添字のリスト。
+            u: 勤務の添字 → 夜勤時間のスロット数。
+
+        Returns:
+            `(下界 LB_n, 上界 UB_n)`。"""
         T = self.T
         un = [u[s] for s in S if self.I.shifts[s].cat in self.I.night_cats]
         ud = [u[s] for s in S if self.I.shifts[s].cat not in self.I.night_cats] or [0]
@@ -72,7 +80,15 @@ class DomainConstraints(ModelKernel):
         """看護師 n の (夜勤時間の式, 算入人数への寄与) を返す。算入されないなら None。
           UB_n < θ_n → 常に除外（z_n=0）  / LB_n ≥ θ_n → 常に算入（z_n=1 の定数）
           それ以外   → z_n と y[n,d,s] ≥ x[n,H+d,s] + z_n − 1（片側）を生成し、y で数える。
-        生成した補助制約は out に足す。識別子 z_n→`z`, y[n,d,s]→`y`（解の読み出しに使わない）"""
+        生成した補助制約は out に足す。識別子 z_n→`z`, y[n,d,s]→`y`（解の読み出しに使わない）
+
+        Args:
+            n: 看護師の添字。
+            u: 勤務の添字 → 夜勤時間のスロット数。
+            out: 補助制約（定義式）を足すリスト。
+
+        Returns:
+            `(夜勤時間の式, 算入人数への寄与)`。算入されないなら `None`。"""
         I, T = self.I, self.T
         if n in I.night_only:
             return None

@@ -83,7 +83,18 @@ REGISTRY: dict[str, ConstraintSpec] = {}
 def constraint(name: str, layer: str, relaxable: bool = True, scope: str = "optional",
                source: tuple[str, ...] = (), title: str = ""):
     """制約メソッドを登録するデコレータ。メソッドは `list[Expression | Item | Aux]` を返すだけ（副作用なし）。
-    補助変数は、そのメソッド内で生成する。"""
+    補助変数は、そのメソッド内で生成する。
+
+    Args:
+        name: 制約名（registry の識別子。重複不可）。
+        layer: 式の作り方の分類（L1〜L5、EPS、SYM）。
+        relaxable: 診断で緩和候補にしてよいか。
+        scope: 適用範囲（`core` / `law` / `domain` / `optional`）。
+        source: 根拠ID（`docs/legal/constraints.yaml` の id）の並び。
+        title: 制約クラス名（日本語・短い）。
+
+    Returns:
+        制約メソッドを登録するデコレータ。"""
     if scope not in SCOPES:
         raise InputError(f"scope は {SCOPES} のいずれか: {scope!r}")
     if name in REGISTRY:
@@ -97,7 +108,14 @@ def constraint(name: str, layer: str, relaxable: bool = True, scope: str = "opti
 
 def selected_constraints(I: Instance, enabled: set[str] | None = None) -> list[str]:
     """有効にする制約名。カーネル・層1は常に有効（enabled や Rules.off で外そうとすると ValueError）。
-    層2・層3は Rules.off に含まれず、かつ enabled（None=全て）に含まれるもの。"""
+    層2・層3は Rules.off に含まれず、かつ enabled（None=全て）に含まれるもの。
+
+    Args:
+        I: 入力データ（`Rules.off` を使う）。
+        enabled: 有効にする制約名（`None` なら全て）。
+
+    Returns:
+        有効な制約名のリスト（登録順）。"""
     bad = [nm for nm in I.rules.off if nm not in REGISTRY or REGISTRY[nm].scope in MANDATORY]
     if bad:
         raise InputError(f"Rules.off に指定できない制約: {bad}")
@@ -110,5 +128,11 @@ def selected_constraints(I: Instance, enabled: set[str] | None = None) -> list[s
 
 
 def toggleable(names=None) -> list[str]:
-    """層2・層3の制約名（実験で1つずつ外す対象）。names を渡すとその中から選ぶ"""
+    """層2・層3の制約名（実験で1つずつ外す対象）。names を渡すとその中から選ぶ
+
+    Args:
+        names: 絞り込む制約名（`None` なら全て）。
+
+    Returns:
+        層2・層3の制約名のリスト。"""
     return [nm for nm, sp in REGISTRY.items() if sp.scope in TOGGLEABLE and (names is None or nm in names)]

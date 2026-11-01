@@ -77,12 +77,21 @@ class Diagnosis:
         return [x for x in self.items if REGISTRY[x.group].scope in TOGGLEABLE]
 
     def explain(self) -> str:
-        """診断結果の日本語の説明"""
+        """診断結果の日本語の説明
+
+        Returns:
+            診断結果の日本語の説明文（`explain(self)` と同じ）。"""
         return explain(self)
 
 
 def _require_solver(name: str) -> str:
-    """MUS に使うソルバーが導入済みか確かめる。未導入なら（黙って別のソルバーに替えず）RuntimeError"""
+    """MUS に使うソルバーが導入済みか確かめる。未導入なら（黙って別のソルバーに替えず）RuntimeError
+
+    Args:
+        name: MUS に使うソルバー名。
+
+    Returns:
+        `name` そのもの。"""
     if name not in cp.SolverLookup.supported():
         raise SolverUnavailableError(f"MUS ソルバー {name!r} が使えない（導入済み: {cp.SolverLookup.supported()}）。"
                            "exact は `pip install exact` で入れる")
@@ -92,7 +101,16 @@ def _require_solver(name: str) -> str:
 def _mus_in_child(soft: list, hard: list, solver: str, budget: float):
     """cpmpy.tools.mus を fork した子プロセスで実行し、budget 秒で打ち切る。戻り値は soft の添字の列、打ち切りなら None。
     子は親のメモリをそのまま引き継ぐ（式を pickle しない）ので、結果は soft の添字で返す。
-    fork が使えない環境では、時間制限を黙って外さず RuntimeError にする。"""
+    fork が使えない環境では、時間制限を黙って外さず RuntimeError にする。
+
+    Args:
+        soft: 絞り込み対象の制約式（soft）のリスト。
+        hard: 常に成り立たせる制約式（hard）のリスト。
+        solver: MUS を求めるソルバー名。
+        budget: 時間制限（秒）。
+
+    Returns:
+        MUS に含まれる soft の添字のリスト。時間切れで打ち切ったときは `None`。"""
     if "fork" not in multiprocessing.get_all_start_methods():
         raise SolverUnavailableError("MUS の時間制限には fork が必要（この環境では使えない）。mus_time_limit を使うには Linux などで実行する")
     ctx = multiprocessing.get_context("fork")
@@ -126,7 +144,16 @@ def _mus_in_child(soft: list, hard: list, solver: str, budget: float):
 def _bounded_mus(soft: list, hard: list, solver: str, budget: float):
     """時間制限つきの MUS。戻り値は (矛盾する制約の式の列, 最小か)。事前候補も取れなければ None。
     ① 仮定つきの求解 1 回でコア（事前候補。最小とは限らない）を取る。② mus を budget 秒で実行。終われば最小。
-    ③ 打ち切りなら、①の事前候補を返す（最小でない可能性）。"""
+    ③ 打ち切りなら、①の事前候補を返す（最小でない可能性）。
+
+    Args:
+        soft: 絞り込み対象の制約式（soft）のリスト。
+        hard: 常に成り立たせる制約式（hard）のリスト。
+        solver: MUS を求めるソルバー名。
+        budget: MUS 1回あたりの時間制限（秒）。
+
+    Returns:
+        `(矛盾する制約式のリスト, 最小か)`。事前候補も取れなかったときは `None`。"""
     model, exprs, assump = make_assump_model(soft, hard=hard)
     s = cp.SolverLookup.get(solver, model)
     by_assump = dict(zip(assump, exprs))
@@ -142,7 +169,14 @@ def _bounded_mus(soft: list, hard: list, solver: str, budget: float):
 
 
 def _check(exprs: list, time_limit: float) -> str:
-    """exprs が充足可能かを求解用のソルバー（CP-SAT）で調べる。"sat" / "unsat" / "unknown"（時間切れ）"""
+    """exprs が充足可能かを求解用のソルバー（CP-SAT）で調べる。"sat" / "unsat" / "unknown"（時間切れ）
+
+    Args:
+        exprs: 調べる制約式のリスト。
+        time_limit: 時間制限（秒）。
+
+    Returns:
+        `"sat"`（解あり）・`"unsat"`（解なしと証明）・`"unknown"`（時間切れ）のいずれか。"""
     s = cp.SolverLookup.get(SOLVE_SOLVER, cp.Model(exprs))
     if s.solve(time_limit=time_limit):
         return "sat"
@@ -228,7 +262,13 @@ def diagnose(I: Instance, eps: Eps, time_limit: float | None = None, mus_solver:
 
 
 def explain(d: Diagnosis) -> str:
-    """Diagnosis の日本語の説明文"""
+    """Diagnosis の日本語の説明文
+
+    Args:
+        d: `diagnose` の結果。
+
+    Returns:
+        診断の日本語の説明文。矛盾があれば、原因の制約（MUS）と対処を含む。"""
     if d.status == FEASIBLE:
         return "【診断】解が見つかりました（制約の矛盾はありません）。"
     if d.status == TIMEOUT:

@@ -50,6 +50,7 @@ class LawParams:
     holiday_strict_calendar: bool = False  # True なら「前日の勤務が日をまたいで食い込む休」は休日に数えない
 
     def __post_init__(self):
+        """選択肢の値が許される範囲かを検査する。不正なら `InputError`。"""
         if self.holiday_rule not in (HOLIDAY_WEEKLY, HOLIDAY_4W4D):
             raise InputError(f"holiday_rule は {HOLIDAY_WEEKLY!r} か {HOLIDAY_4W4D!r}: {self.holiday_rule!r}")
         if not 0 <= self.week_start < WEEK:
@@ -69,11 +70,18 @@ class DomainParams:
     short_time_slots: int = 24             # 短時間正職員の閾値（12h）
 
     def __post_init__(self):
+        """`admission_class` が `incl_slots` にあるかを検査する。無ければ `InputError`。"""
         if self.admission_class not in self.incl_slots:
             raise InputError(f"admission_class は {sorted(self.incl_slots)} のいずれか: {self.admission_class!r}")
 
     def theta(self, short_time: bool) -> int:
-        """算入閾値 θ_n（スロット）: 短時間正職員は short_time_slots、それ以外は入院基本料の区分で決まる"""
+        """算入閾値 θ_n（スロット）: 短時間正職員は short_time_slots、それ以外は入院基本料の区分で決まる
+
+        Args:
+            short_time: 短時間正職員か。
+
+        Returns:
+            72時間ルールの算入閾値 θ_n（スロット数）。"""
         return self.short_time_slots if short_time else self.incl_slots[self.admission_class]
 
 
@@ -96,7 +104,14 @@ class Rules:
 
 
 def _delegate(layer: str, attr: str) -> property:
-    """Instance から rules.<layer>.<attr> を読む読み取り専用プロパティ"""
+    """Instance から rules.<layer>.<attr> を読む読み取り専用プロパティ
+
+    Args:
+        layer: 委譲先の層（`law` / `domain` / `guideline`）。
+        attr: その層のパラメータ名。
+
+    Returns:
+        `Instance` から `rules.<layer>.<attr>` を読む読み取り専用プロパティ。"""
     return property(lambda self: getattr(getattr(self.rules, layer), attr),
                     doc=f"rules.{layer}.{attr} への委譲（読み取り専用）")
 
@@ -132,6 +147,7 @@ class Instance:
     cat_names: dict[str, str] = field(default_factory=dict)   # 勤務区分名の上書き（未指定の区分は既定の表）
 
     def __post_init__(self):
+        """入力の整合（看護師数の一致、需要が各日を空きなく覆うことなど）を検査する。不正なら `InputError`。"""
         self._check_demand()
         if self.start_date is not None and self.start_date.weekday() != self.start_weekday:
             raise InputError(f"start_date {self.start_date} は曜日が start_weekday={self.start_weekday}（0=月）と一致しない"
@@ -174,7 +190,13 @@ class Instance:
         return self.history.shape[1]
 
     def idx(self, name: str) -> int:
-        """勤務名 → 添字 s。無ければ KeyError"""
+        """勤務名 → 添字 s。無ければ KeyError
+
+        Args:
+            name: 勤務の名前（例: 休）。
+
+        Returns:
+            勤務の添字 s。"""
         for i, s in enumerate(self.shifts):
             if s.name == name:
                 return i
@@ -196,34 +218,74 @@ class Eps:
 # インスタンスへの単純な問い合わせ
 # =============================================================================
 def inclusion_threshold(I: Instance, n: int) -> int:
-    """θ_n: 72時間ルールの算入閾値（スロット）。個別上書き → 短時間正職員 → 入院基本料の区分、の順"""
+    """θ_n: 72時間ルールの算入閾値（スロット）。個別上書き → 短時間正職員 → 入院基本料の区分、の順
+
+    Args:
+        I: 入力データ。
+        n: 看護師の添字。
+
+    Returns:
+        算入閾値 θ_n（スロット数）。"""
     if n in I.incl_threshold:
         return I.incl_threshold[n]
     return I.rules.domain.theta(n in I.short_time)
 
 
 def night_band(I: Instance, eps: Eps) -> tuple[int, int]:
-    """夜勤回数の帯 [⌊avg⌋−δ, ⌈avg⌉+δ]（下限は 0 以上）"""
+    """夜勤回数の帯 [⌊avg⌋−δ, ⌈avg⌉+δ]（下限は 0 以上）
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約の閾値（`night_delta` を使う）。
+
+    Returns:
+        `(下限, 上限)`。夜勤回数が入る帯。"""
     return max(0, math.floor(I.night_avg) - eps.night_delta), math.ceil(I.night_avg) + eps.night_delta
 
 
 def night_capable(I: Instance, n: int) -> bool:
-    """看護師 n が夜勤区分の勤務を取れるか"""
+    """看護師 n が夜勤区分の勤務を取れるか
+
+    Args:
+        I: 入力データ。
+        n: 看護師の添字。
+
+    Returns:
+        夜勤区分の勤務を取れれば `True`。"""
     return any(I.shifts[s].cat in I.night_cats for s in I.domain[n])
 
 
 def is_part(I: Instance, n: int) -> bool:
-    """パート職員 = 取れる勤務の区分が "P" のみ（休・有休を除く）"""
+    """パート職員 = 取れる勤務の区分が "P" のみ（休・有休を除く）
+
+    Args:
+        I: 入力データ。
+        n: 看護師の添字。
+
+    Returns:
+        パート職員なら `True`。"""
     return {I.shifts[s].cat for s in I.domain[n] if I.shifts[s].is_work} == {"P"}
 
 
 def weekend_days(I: Instance) -> tuple[list[int], list[int]]:
-    """計画日のうち土曜・日曜の日付 d（start_weekday: 0=月）"""
+    """計画日のうち土曜・日曜の日付 d（start_weekday: 0=月）
+
+    Args:
+        I: 入力データ。
+
+    Returns:
+        `(土曜の計画日のリスト, 日曜の計画日のリスト)`。"""
     wd = lambda d: (I.start_weekday + d) % WEEK
     return ([d for d in range(I.n_days) if wd(d) == 5], [d for d in range(I.n_days) if wd(d) == 6])
 
 
 def weekend_pairs(I: Instance) -> list[tuple[int, int]]:
     """週末 = (土曜 d, 日曜 d+1) の組。勤務週末数・検証・評価で共通に使う定義。
-    計画の最終日が土曜のとき、日曜が計画の外なので、その週末は数えない。"""
+    計画の最終日が土曜のとき、日曜が計画の外なので、その週末は数えない。
+
+    Args:
+        I: 入力データ。
+
+    Returns:
+        `(土曜の計画日, 日曜の計画日)` の組のリスト。"""
     return [(d, d + 1) for d in weekend_days(I)[0] if d + 1 < I.n_days]

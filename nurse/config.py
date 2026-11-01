@@ -34,7 +34,14 @@ class Settings:
 
 
 def parse_properties(text: str, source: str = "<text>") -> Settings:
-    """properties の文字列 → Settings。不正は InputError（どのファイルの何行目かを示す）"""
+    """properties の文字列 → Settings。不正は InputError（どのファイルの何行目かを示す）
+
+    Args:
+        text: properties 形式の文字列。
+        source: エラー文に出す入力元の名前（ファイル名など）。
+
+    Returns:
+        読み込んだ設定。ファイルに無いキーは既定値。"""
     found: dict[str, float] = {}
     for no, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
@@ -59,7 +66,13 @@ def parse_properties(text: str, source: str = "<text>") -> Settings:
 
 
 def load_settings(path: str | os.PathLike | None = None) -> Settings:
-    """設定を読む（呼ぶたびに読み直す。ファイルを書き換えると次の呼び出しから反映される）"""
+    """設定を読む（呼ぶたびに読み直す。ファイルを書き換えると次の呼び出しから反映される）
+
+    Args:
+        path: 設定ファイルのパス。省略すると環境変数 `NURSE_PROPERTIES`、リポジトリ直下の `nurse.properties` の順に探す。
+
+    Returns:
+        読み込んだ設定。どのファイルも無ければ既定値。"""
     explicit = path if path is not None else os.environ.get(ENV_VAR)
     if explicit is not None:
         p = Path(explicit)

@@ -77,6 +77,8 @@ plugins:
               - tools/griffe_comments.py:InlineComments   # 項目の行末コメントを説明として表示する
             heading_level: 1
             docstring_style: google   # 日本語の自由文はそのまま Markdown として表示し、`Args:` `Returns:` の節だけ表にする
+            docstring_options:
+              warn_missing_types: false   # 型注釈の無い関数も説明は載せる（引数名の不一致などの警告は有効のまま）
             members_order: source
             show_root_heading: true
             show_source: false

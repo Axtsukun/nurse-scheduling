@@ -73,5 +73,11 @@ class InternalError(NurseError, RuntimeError):
 
 
 def code_of(exc: BaseException) -> ReturnCode:
-    """例外 → リターンコード。NurseError はその code、それ以外の想定外の例外は INTERNAL_ERROR"""
+    """例外 → リターンコード。NurseError はその code、それ以外の想定外の例外は INTERNAL_ERROR
+
+    Args:
+        exc: 捕まえた例外。
+
+    Returns:
+        対応するリターンコード。`NurseError` ならその `code`、それ以外の想定外の例外は `INTERNAL_ERROR`。"""
     return exc.code if isinstance(exc, NurseError) else ReturnCode.INTERNAL_ERROR
