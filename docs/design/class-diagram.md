@@ -3,9 +3,9 @@
 エンジンのコア部分を、**IF（入口・設定・戻り値）・データモデル・数理モデル・求解エンジン**の4つの領域に分けて、UML のクラス図（Mermaid）で示す。
 モジュール間の依存は README 3.4 節、処理の流れ（シーケンス図）は README 3.1 節にある。
 
-- 図は、`nurse/` のソースから取り出した名前（クラス・フィールド・メソッド）に基づく。構成を変えたときは、この図も直す。
+- 図は、`nurse/` と、トップレベルの `nurse_csp.py`・`verify.py`・`evaluate.py` のソースから取り出した名前（クラス・フィールド・メソッド・戻り値）に基づく。構成を変えたときは、この図も直す。`tests/test_docs.py` が、図とコードの一致を検査する。
 - Python には UML のクラスにあたるもの以外（モジュール内の関数、データクラス、列挙型）があるので、ステレオタイプで区別する（下の凡例）。
-- Mermaid（v10.9.1）で、5枚とも描画できることを確認している。
+- Mermaid の v10.9.1 と v11.17.2 で、5枚とも描画できることを確認している（GitHub が使う版は未確認）。
 
 ## 凡例
 
@@ -197,7 +197,7 @@ classDiagram
     Rules "1" *-- "1" LawParams : law
     Rules "1" *-- "1" DomainParams : domain
     Rules "1" *-- "1" GuidelineParams : guideline
-    Assignment ..> Instance : A[n][d] は shifts の添字
+    note for Assignment "A[n][d] は、看護師 n の計画日 d の勤務の添字（Instance.shifts の位置）"
 ```
 
 - `Instance` が入力のすべてを持つ。看護師・勤務・日付を整数の添字で表す（例: 勤務は `shifts` の位置）。
@@ -496,7 +496,7 @@ classDiagram
         <<module>>
         +extract(M) Assignment
         +check(I, eps, A, off) list~str~
-        +report(I, A) str
+        +report(I, A) dict
     }
     class evaluate {
         <<module>>
