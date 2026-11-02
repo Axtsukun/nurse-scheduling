@@ -54,6 +54,7 @@ tests/
   - **MUS の時間制限**（`diagnose(mus_time_limit=…)`、MUS 1回ごと。既定は `nurse.properties` の `mus.time_limit`＝30秒）：①`_bounded_mus` が、MUS の前に仮定つきの求解 1 回でコア（事前候補。最小とは限らない）を取る → ②`cpmpy.tools.mus` を fork した子プロセスで実行して打ち切る（式を pickle せず、結果は添字で返す。fork が使えない環境では黙って外さず `SolverUnavailableError`）→ ③打ち切りなら事前候補を返し `Diagnosis.minimal=False`。事前候補も取れなければ items が空（矛盾は確定、原因は特定できず）。
   - 結果は `Diagnosis`（status は feasible / timeout / conflict。`items` / `soft_items` / `given_items`）で、`explain()` が日本語で説明する。時間切れでは MUS を求めない（矛盾かどうか不明なため）。
 - **設定とリターンコード（決定事項）**：求解と MUS の時間制限は `nurse.properties`（`solve.time_limit`・`mus.time_limit`、既定は各30秒）に外出しし、`solve()`・`diagnose()` は引数を省略するとこれを使う（`config.load_settings`。呼ぶたびに読み直す）。結果は `ReturnCode`（0 正常 / 10 求解が時間切れ / 20 制約矛盾 / 21 MUS が時間切れ / 22 原因を特定できず / 30 入力・設定の誤り / 40 ソルバー・環境 / 50 内部エラー）で表し、`Diagnosis.code` と CLI の終了コードに使う。入力・設定の誤りは `InputError`（`ValueError` の一種）、環境は `SolverUnavailableError`、内部は `InternalError`（どちらも `RuntimeError` の一種）。新しい例外・状態を足すときは `nurse/codes.py` にコードを足す。
+- **有給休暇（決定事項）**：付与日数・比例付与・年5日の取得の**管理は利用者が行う**（システムの対象外）。システムは、利用者が入力した取得日だけを固定割当（`fixed`、hard）として受け取り、その日を「有休」にする。有休は `fixed_only` の勤務で、常勤・パートを問わず誰にも固定できるが、ソルバーが選ぶ値ではない（シフト要望にも使えない）。日数の検査・年5日の確保・残日数の管理は実装しない。
 - **パターン化（週パターン列挙）は採用しない**（規模が約100倍、CSPではLP緩和の利点が活きない）。
 
 ## 前提と教訓（メモ。入力の定義と設計の判断を誤らないために）
