@@ -1,6 +1,8 @@
 """診断（diagnose）: 解けない原因を「時間切れ」と「制約矛盾」に分け、矛盾なら MUS を日本語で説明する。
 hard / soft の分け方: 背景（構造・履歴・補助変数の定義）と前提（カーネル・層1）は hard、層2・層3 は soft。"""
 import dataclasses as dc
+import re
+from collections.abc import Callable
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import cpmpy as cp
@@ -8,13 +10,13 @@ import pytest
 import nurse_csp as m
 
 
-def _inst_offcount():
+def _inst_offcount() -> m.Instance:
     """公休が日数を超える（層2 の offcount 単独の矛盾。前提は不要）"""
     I = m.synthetic()
     return dc.replace(I, off_days=[I.n_days + 1] + I.off_days[1:])
 
 
-def _inst_fixed_week_consec():
+def _inst_fixed_week_consec() -> m.Instance:
     """看護師3を6日目(土)から7日間ずっと日勤に固定（カーネル）→ 連続勤務5日以内（層3）と矛盾"""
     I = m.synthetic()
     fx = dict(I.fixed)
@@ -23,7 +25,7 @@ def _inst_fixed_week_consec():
     return dc.replace(I, fixed=fx)
 
 
-def _inst_fixed_week_holiday():
+def _inst_fixed_week_holiday() -> m.Instance:
     """月〜日の1週間ずっと日勤に固定（カーネル）。連続勤務をオフにすると、週1休（層1）と矛盾 = hard 同士の矛盾"""
     I = m.synthetic()
     fx = dict(I.fixed)
@@ -32,50 +34,59 @@ def _inst_fixed_week_holiday():
     return dc.replace(I, fixed=fx, rules=dc.replace(I.rules, off=frozenset({"consec"})))
 
 
-def _is_sat(hard, soft):
+def _inst_72h_extreme() -> m.Instance:
+    """72時間ルールを 20 時間以下に締める。この制約を外さない限り、他のどの制約を外しても実行不能のままなので、
+    MUS の絞り込みが終わらない（時間制限の挙動を見るための条件。ソルバーの比較には使わない）"""
+    I = m.synthetic()
+    return dc.replace(I, rules=dc.replace(I.rules, domain=dc.replace(I.rules.domain, limit_units=40)))
+
+
+def _is_sat(hard: list, soft: list) -> bool:
     return cp.Model(hard + soft).solve("ortools")
 
 
-def test_feasible():
+def test_feasible() -> None:
     d = m.diagnose(m.synthetic(), m.Eps(), time_limit=30)
-    assert d.status == m.FEASIBLE and not d.items
+    assert d.status == m.FEASIBLE and not d.items and d.code == m.ReturnCode.OK
     assert "矛盾はありません" in d.explain()
 
 
-def test_timeout_is_not_reported_as_conflict():
+def test_timeout_is_not_reported_as_conflict() -> None:
     """時間切れでは、制約矛盾かどうか不明なので MUS を求めず TIMEOUT を返す"""
     d = m.diagnose(m.synthetic(52, 8, T=31), m.Eps(), time_limit=0.05)
-    assert d.status == m.TIMEOUT and not d.items
+    assert d.status == m.TIMEOUT and not d.items and d.code == m.ReturnCode.SOLVE_TIME_LIMIT
     assert "時間切れ" in d.explain() and "矛盾かどうかは不明" in d.explain()
 
 
-def test_soft_only_conflict_needs_no_given_constraint():
+def test_soft_only_conflict_needs_no_given_constraint() -> None:
     d = m.diagnose(_inst_offcount(), m.Eps(), time_limit=60)
     assert d.status == m.CONFLICT and not d.hard_only and d.mus_solver == "exact"
-    assert d.groups == ["offcount"] and not d.given_items
-    assert [x.label for x in d.soft_items] == ["N00: 公休をちょうど31日"]
+    assert d.groups == ["offcount"] and not d.given_items and d.code == m.ReturnCode.CONFLICT
+    assert [x.line for x in d.soft_items] == ["offcount-0001  [公休数一致] N00 公休数=31"]
     text = d.explain()
-    assert "制約矛盾" in text and "N00: 公休をちょうど31日" in text and "層2" in text
+    assert "制約矛盾" in text and "offcount-0001  [公休数一致] N00 公休数=31" in text and "層2" in text
     assert "前提としている制約" not in text                          # 前提が不要なら、その欄は出さない
 
 
-def test_soft_conflict_names_the_given_constraints_it_depends_on():
+def test_soft_conflict_names_the_given_constraints_it_depends_on() -> None:
     """固定割当（カーネル・hard）と連続勤務（層3・soft）: soft は連続勤務の1窓、前提は窓内の固定割当6件だけ"""
     d = m.diagnose(_inst_fixed_week_consec(), m.Eps(), time_limit=60)
     assert d.status == m.CONFLICT and not d.hard_only and d.groups == ["fixed", "consec"]
-    assert [x.group for x in d.soft_items] == ["consec"] and "6日間に勤務は5日以内" in d.soft_items[0].label
-    assert len(d.given_items) == 6 and all(x.label.startswith("N03 ") and "日に固定" in x.label for x in d.given_items)
+    assert [x.group for x in d.soft_items] == ["consec"]
+    assert d.soft_items[0].message == "N03 6日目(土) - 11日目(木) 連続勤務日数=5"
+    assert len(d.given_items) == 6 and all(x.message.startswith("N03 ") and x.message.endswith(" 勤務=日") for x in d.given_items)
     text = d.explain()
+    assert "[固定割当] N03 6日目(土) 勤務=日" in text and "[連続勤務日数上限] N03 6日目(土) - 11日目(木) 連続勤務日数=5" in text
     assert "前提としている制約（オフにできない。カーネル・層1）" in text and "矛盾の原因になっている制約（外せる。層2・層3）" in text
     assert "入力データ（固定割当など）を見直す手もあります" in text
 
 
-def test_hard_only_conflict_is_diagnosed_separately():
+def test_hard_only_conflict_is_diagnosed_separately() -> None:
     """固定割当（カーネル）と週1休（層1）はどちらもオフにできない → soft の MUS は空 → 前提同士の矛盾として説明"""
     d = m.diagnose(_inst_fixed_week_holiday(), m.Eps(), time_limit=60)
     assert d.status == m.CONFLICT and d.hard_only and d.groups == ["fixed", "holiday"]
     assert not d.soft_items and len(d.given_items) == 8
-    days = [int(x.label.split("日目")[0].split()[-1]) for x in d.given_items if x.group == "fixed"]
+    days = [int(re.search(r"(\d+)日目", x.message).group(1)) for x in d.given_items if x.group == "fixed"]
     assert days == sorted(days) == list(range(8, 15))                    # 固定割当は日付順に並ぶ
     assert sum(x.group == "fixed" for x in d.items) == 7 and sum(x.group == "holiday" for x in d.items) == 1
     text = d.explain()
@@ -83,21 +94,22 @@ def test_hard_only_conflict_is_diagnosed_separately():
 
 
 @pytest.mark.parametrize("make", [_inst_offcount, _inst_fixed_week_consec, _inst_fixed_week_holiday])
-def test_mus_is_unsat_and_minimal(make):
+def test_mus_is_unsat_and_minimal(make: Callable[[], m.Instance]) -> None:
     """MUS（前提 + soft）= それ自体は充足不能で、どの1件を除いても充足可能（極小）。独立に組み直したモデルで確かめる"""
     I, eps = make(), m.Eps()
     d = m.diagnose(I, eps, time_limit=60)
     named = [x for items in m.NurseModel(I, eps).build_named().values() for x in items]
     background = [x.expr for x in named if x.hard]
-    chosen = [x for x in named if not x.hard and any(x.group == y.group and x.label == y.label for y in d.items)]
-    assert len(chosen) == len(d.items)                                    # ラベルが一意で照合できる
+    ids = {x.id for x in d.items}                                         # ID は同じ入力なら同じ → 組み直したモデルと照合できる
+    chosen = [x for x in named if x.id in ids]
+    assert len(chosen) == len(d.items) and not any(x.hard for x in chosen)
     assert not _is_sat(background, [x.expr for x in chosen])              # 矛盾している
     for i in range(len(chosen)):
         rest = [x.expr for j, x in enumerate(chosen) if j != i]
-        assert _is_sat(background, rest), chosen[i].label                 # 1件外せば解ける
+        assert _is_sat(background, rest), chosen[i].id                    # 1件外せば解ける
 
 
-def test_solver_choice_is_fixed_cpsat_for_solve_exact_for_mus():
+def test_solver_choice_is_fixed_cpsat_for_solve_exact_for_mus() -> None:
     """決定事項: 求解は CP-SAT、MUS は exact。既定値がそれで、診断も exact で MUS を求める"""
     import inspect
     assert m.SOLVE_SOLVER == "ortools" and m.MUS_SOLVER == "exact"
@@ -107,7 +119,37 @@ def test_solver_choice_is_fixed_cpsat_for_solve_exact_for_mus():
     assert d.status == m.CONFLICT and d.mus_solver == "exact"
 
 
-def test_missing_mus_solver_fails_loudly_instead_of_switching():
+def test_missing_mus_solver_fails_loudly_instead_of_switching() -> None:
     """MUS ソルバーが使えないとき、黙って別のソルバーに替えず、導入方法つきのエラーにする"""
-    with pytest.raises(RuntimeError, match="pip install exact"):
+    with pytest.raises(m.SolverUnavailableError, match="pip install exact") as e:       # RuntimeError の一種
         m.diagnose(_inst_offcount(), m.Eps(), time_limit=60, mus_solver="no_such_solver")
+    assert isinstance(e.value, RuntimeError) and m.code_of(e.value) == m.ReturnCode.SOLVER_UNAVAILABLE
+
+
+def test_mus_that_finishes_in_time_is_minimal() -> None:
+    d = m.diagnose(_inst_offcount(), m.Eps(), time_limit=60)
+    assert d.minimal and "最小でない" not in d.explain()
+
+
+def test_mus_time_limit_returns_the_precandidate_core_when_the_mus_does_not_finish() -> None:
+    """mus が時間内に終わらないときは、事前候補（仮定つきの求解で得たコア）を返す。時間内に戻り、矛盾する集合である"""
+    import time
+    I = _inst_72h_extreme()
+    t0 = time.perf_counter()
+    d = m.diagnose(I, m.Eps(), time_limit=60, mus_time_limit=3)
+    assert time.perf_counter() - t0 < 40                                   # 上限なしなら戻らない条件
+    assert d.status == m.CONFLICT and not d.minimal and d.items and d.code == m.ReturnCode.CONFLICT_MUS_TIME_LIMIT
+    assert "最小でない可能性" in d.explain()
+    # 返った制約（ID で引き直す）だけを soft として残しても実行不能（矛盾する集合になっている）
+    flat = [x for items in m.NurseModel(I, m.Eps()).build_named().values() for x in items]
+    chosen = {x.id for x in d.items}
+    hard = [x.expr for x in flat if x.hard or m.REGISTRY[x.group].scope in m.MANDATORY]
+    soft = [x.expr for x in flat if x.id in chosen and not x.hard]
+    assert len(soft) == len(d.soft_items) and not _is_sat(hard, soft)
+
+
+def test_mus_time_limit_too_short_to_find_any_core_reports_unidentified_cause() -> None:
+    """事前候補も時間内に取れなければ、矛盾は確定しているが原因は特定できない（items が空）"""
+    d = m.diagnose(_inst_72h_extreme(), m.Eps(), time_limit=60, mus_time_limit=0.001)
+    assert d.status == m.CONFLICT and not d.items and not d.minimal and d.code == m.ReturnCode.CONFLICT_UNIDENTIFIED
+    assert "特定できませんでした" in d.explain()

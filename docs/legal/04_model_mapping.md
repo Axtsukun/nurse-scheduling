@@ -31,7 +31,7 @@
 | カーネル | `core` | `struct`, `history`, `fixed` | — |
 | 層1 労働法規 | `law` | `holiday` | `LawParams`（休日の規則、週の起算曜日、4週の起算日、暦日の厳密性） |
 | 層2 病院・看護職共通 | `domain` | `cover`, `skill`, `offcount`, `72h` | `DomainParams`（夜勤時間帯、72h、入院基本料の区分、算入閾値） |
-| 層3 任意 | `optional` | `rest`, `consec`, `offblock`, `weekend`, `weekend_spread`, `night_band`, `soft_off`, `req_off`, `req_shift`, `sym_break` | `GuidelineParams`、`Eps` |
+| 層3 任意 | `optional` | `rest`, `consec`, `offblock`, `weekend`, `weekend_spread`, `night_band`, `req_off`, `req_shift`, `sym_break` | `GuidelineParams`、`Eps` |
 
 - カーネルと層1は `Rules.off` / `solve(enabled=...)` で外せない（外そうとすると `ValueError`）。
 - 層2・層3は `Rules.off`（病院のプロファイル）または `enabled`（実験）で外せる。

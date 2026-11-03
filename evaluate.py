@@ -6,7 +6,7 @@
   3. パート職員の同上
   4. 72時間ルールでの平均夜勤時間（算入者の延べ夜勤時間 / 算入者数）
   5. 土日勤務の偏り（人ごとの土日勤務日数・勤務週末数・平日との勤務率の差）
-  6. 要望の充足（既存の希望休・休み要望・シフト要望の件数と充足率）
+  6. 要望の充足（休み要望（希望休を含む）・シフト要望の件数と充足率）
 
 使い方: python evaluate.py        （合成インスタンスを求解して評価）
 """
@@ -18,11 +18,24 @@ import verify
 
 
 def _fmt_hm(h: int) -> str:
+    """スロット番号を `HH:MM`（ゼロ埋め）にする。
+
+    Args:
+        h: 30分単位のスロット番号（0 = 0:00、48 = 翌日 0:00）。
+
+    Returns:
+        `HH:MM` 形式の時刻文字列。"""
     return f"{h // 2:02d}:{30 * (h % 2):02d}"
 
 
 def _summary(values: list) -> dict:
-    """人数・min・max・平均・標準偏差（母集団）・中央値。空なら空の辞書"""
+    """人数・min・max・平均・標準偏差（母集団）・中央値。空なら空の辞書
+
+    Args:
+        values: 集計する数値のリスト。
+
+    Returns:
+        `n`（人数）・`min`・`max`・`mean`・`sd`（母集団の標準偏差）・`median` の辞書。空なら空の辞書。"""
     if not values:
         return {}
     return dict(n=len(values), min=min(values), max=max(values), mean=st.fmean(values),
@@ -34,7 +47,14 @@ def _summary(values: list) -> dict:
 # =============================================================================
 def coverage(I: Instance, A: Assignment) -> list[dict]:
     """日 d・需要区間 (a,b,r) ごとの要求数 r と、区間内の最小在席数（30分スロット単位で直接数える）。
-    併せて、日 d に始まる勤務の区分別人数。"""
+    併せて、日 d に始まる勤務の区分別人数。
+
+    Args:
+        I: 入力データ。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+
+    Returns:
+        日ごとの辞書のリスト。`day`（計画日）、`bands`（`(a, b, 要求数, 最小在席数)` の並び）、`by_cat`（その日に始まる勤務の区分別人数）を持つ。"""
     S = I.shifts
     full = full_sequences(I, A)
     cats = sorted({sd.cat for sd in S if sd.is_work})
@@ -47,9 +67,17 @@ def coverage(I: Instance, A: Assignment) -> list[dict]:
 
 
 def person_stats(I: Instance, A: Assignment, members: list[int]) -> dict:
-    """勤務回数(日数)・勤務時間(h)・夜勤回数(夜勤区分の日数)の統計量"""
+    """勤務回数(日数)・勤務時間(h)・夜勤回数(夜勤区分の日数)の統計量
+
+    Args:
+        I: 入力データ。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+        members: 集計する看護師の添字のリスト。
+
+    Returns:
+        `勤務回数`・`勤務時間h`・`夜勤回数` をキーに、それぞれの統計量（`_summary` の形）を値にした辞書。"""
     S = I.shifts
-    vals = {
+    vals: dict[str, list[float]] = {
         "勤務回数": [sum(S[s].is_work for s in A[n]) for n in members],
         "勤務時間h": [sum((S[s].end - S[s].start) for s in A[n] if S[s].is_work) / 2 for n in members],
         "夜勤回数": [sum(S[s].cat in I.night_cats for s in A[n]) for n in members],
@@ -59,7 +87,14 @@ def person_stats(I: Instance, A: Assignment, members: list[int]) -> dict:
 
 def night72(I: Instance, A: Assignment) -> dict:
     """72時間ルール: 算入者（夜勤専従を除き、夜勤時間 h_n ≥ θ_n の者）の平均夜勤時間と上限。
-    上限は Λ + q/（算入者数）を時間に直した値。算入前の全員平均・区分別平均も併記する。"""
+    上限は Λ + q/（算入者数）を時間に直した値。算入前の全員平均・区分別平均も併記する。
+
+    Args:
+        I: 入力データ。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+
+    Returns:
+        `avg_included`（算入者の平均夜勤時間）・`limit`（上限）・`n_included`・`n_excluded`・`avg_all`・`avg_regular`・`avg_part`・`max_included`・`min_included` を持つ辞書（時間の単位は h）。"""
     h = {n: sum(night_units(I, s) for s in A[n]) for n in range(I.n_nurses) if n not in I.night_only}
     inc = [n for n in h if h[n] >= inclusion_threshold(I, n)]
     avg = lambda ns: (sum(h[n] for n in ns) / len(ns) / 2) if ns else float("nan")
@@ -74,7 +109,14 @@ def night72(I: Instance, A: Assignment) -> dict:
 
 def weekend_stats(I: Instance, A: Assignment) -> dict:
     """人ごとの土日勤務。勤務週末数は制約 weekend と同じ定義（weekend_pairs: 土曜と日曜のどちらかに勤務）。
-    勤務率差 = 土日の勤務率 − 平日の勤務率（正なら土日に偏って勤務）。休・有休は非勤務として数える。"""
+    勤務率差 = 土日の勤務率 − 平日の勤務率（正なら土日に偏って勤務）。休・有休は非勤務として数える。
+
+    Args:
+        I: 入力データ。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+
+    Returns:
+        `rows`（人ごとの土日勤務）・`groups`（正規/パート別の統計量）・`n_sat`・`n_sun`（土日の日数）・`limit`（勤務週末数の上限）を持つ辞書。"""
     S, T = I.shifts, I.n_days
     sat, sun = weekend_days(I)
     we = set(sat) | set(sun)
@@ -95,17 +137,30 @@ def weekend_stats(I: Instance, A: Assignment) -> dict:
 
 
 def request_stats(I: Instance, A: Assignment) -> dict:
-    """要望ごとの 件数・充足数・充足率（充足 = 休み要望は「休」、シフト要望は指定の勤務に就く）"""
+    """要望ごとの 件数・充足数・充足率（充足 = 休み要望は「休」、シフト要望は指定の勤務に就く）
+
+    Args:
+        I: 入力データ。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+
+    Returns:
+        `休み要望`・`シフト要望` をキーに、`total`（件数）・`met`（充足数）・`rate`（充足率）を持つ辞書を値にした辞書。"""
     S = I.shifts
-    off = [S[A[n][d]].name == OFF_NAME for n, ds in I.soft_off.items() for d in ds]
     roff = [S[A[n][d]].name == OFF_NAME for n, ds in I.req_off.items() for d in ds]
     rsh = [A[n][d] == s for n, ds in I.req_shift.items() for d, s in ds]
     pack = lambda v: dict(total=len(v), met=sum(v), rate=(sum(v) / len(v)) if v else float("nan"))
-    return {"希望休(既存)": pack(off), "休み要望": pack(roff), "シフト要望": pack(rsh)}
+    return {"休み要望": pack(roff), "シフト要望": pack(rsh)}
 
 
 def evaluate(I: Instance, A: Assignment) -> dict:
-    """全ての集計をまとめて返す"""
+    """全ての集計をまとめて返す
+
+    Args:
+        I: 入力データ。
+        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
+
+    Returns:
+        `coverage`・`regular`・`part`・`night72`・`weekend`・`requests`・`n_regular`・`n_part` を持つ辞書（`print_report` に渡せる）。"""
     reg = [n for n in range(I.n_nurses) if not is_part(I, n)]
     prt = [n for n in range(I.n_nurses) if is_part(I, n)]
     return dict(coverage=coverage(I, A), regular=person_stats(I, A, reg), part=person_stats(I, A, prt),
@@ -117,6 +172,10 @@ def evaluate(I: Instance, A: Assignment) -> dict:
 # 表示（節ごと）
 # =============================================================================
 def _print_coverage(cov: list[dict]) -> None:
+    """1. 日別の要求数/最小在席数（時間帯ごと）と、区分別の割当数を表示する。
+
+    Args:
+        cov: `coverage` の結果。"""
     cats = list(cov[0]["by_cat"])
     print("■ 1. 日別: 要求数/最小在席数（時間帯）と区分別割当数")
     heads = [f"{_fmt_hm(a)}-{_fmt_hm(b)}" for a, b, _, _ in cov[0]["bands"]]
@@ -134,6 +193,12 @@ def _print_coverage(cov: list[dict]) -> None:
 
 
 def _print_person_stats(title: str, stats: dict, count: int) -> None:
+    """2・3. 正規職員またはパート職員の統計量（勤務回数・勤務時間・夜勤回数）を表示する。
+
+    Args:
+        title: 節の見出し。
+        stats: `person_stats` の結果。
+        count: 対象の人数。"""
     print(f"\n■ {title}（{count}人）")
     print(f"{'指標':<10}{'min':>7}{'max':>7}{'mean':>8}{'sd':>7}{'median':>8}")
     for k, v in stats.items():
@@ -142,6 +207,10 @@ def _print_person_stats(title: str, stats: dict, count: int) -> None:
 
 
 def _print_night72(n: dict) -> None:
+    """4. 72時間ルール（月平均夜勤時間）を表示する。
+
+    Args:
+        n: `night72` の結果。"""
     print("\n■ 4. 72時間ルール（月平均夜勤時間）")
     print(f"  算入者の平均 {n['avg_included']:.2f}h / 上限 {n['limit']:.2f}h"
           f"（算入 {n['n_included']}人・除外 {n['n_excluded']}人、算入者の範囲 {n['min_included']:.1f}〜{n['max_included']:.1f}h）")
@@ -149,6 +218,10 @@ def _print_night72(n: dict) -> None:
 
 
 def _print_weekend(wk: dict) -> None:
+    """5. 土日勤務の偏り（区分別の統計量、日数の分布、人別の内訳）を表示する。
+
+    Args:
+        wk: `weekend_stats` の結果。"""
     print(f"\n■ 5. 土日勤務の偏り（土曜{wk['n_sat']}日・日曜{wk['n_sun']}日、勤務週末数の上限 {wk['limit']}）")
     print(f"{'区分':<8}{'指標':<10}{'min':>7}{'max':>7}{'mean':>8}{'sd':>7}")
     for key, label in (("regular", "正規"), ("part", "パート")):
@@ -169,13 +242,21 @@ def _print_weekend(wk: dict) -> None:
 
 
 def _print_requests(req: dict) -> None:
+    """6. 要望の充足（件数・充足数・充足率）を表示する。
+
+    Args:
+        req: `request_stats` の結果。"""
     print("\n■ 6. 要望の充足")
     for k, v in req.items():
         print(f"  {k:<10} {v['met']:>3}/{v['total']:<3} = {v['rate']:.1%}" if v["total"] else f"  {k:<10} なし")
 
 
 def print_report(I: Instance, ev: dict) -> None:
-    """evaluate の結果を節ごとに表示する"""
+    """evaluate の結果を節ごとに表示する
+
+    Args:
+        I: 入力データ（現在は表示に使わない）。
+        ev: `evaluate` の結果。"""
     _print_coverage(ev["coverage"])
     _print_person_stats("2. 正規職員", ev["regular"], ev["n_regular"])
     _print_person_stats("3. パート職員", ev["part"], ev["n_part"])

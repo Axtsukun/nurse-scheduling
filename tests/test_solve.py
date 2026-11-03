@@ -7,7 +7,7 @@ import verify
 
 
 @pytest.mark.parametrize("lin_level", [0, 1])
-def test_synthetic_feasible_and_valid(lin_level):
+def test_synthetic_feasible_and_valid(lin_level: int) -> None:
     I, eps = m.synthetic(), m.Eps()
     assert m.precheck(I, eps) == []
     ok, st, M, times, stats = m.solve(I, eps, time_limit=60, lin_level=lin_level)
@@ -19,7 +19,7 @@ def test_synthetic_feasible_and_valid(lin_level):
     print(lin_level, times, verify.report(I, A))
 
 
-def test_each_constraint_group_toggle():
+def test_each_constraint_group_toggle() -> None:
     """層2・層3の制約群を1つずつ Rules.off で外しても、構築・求解でき、解が（外した制約を除いて）検証を通ること。
     特に night_band を外したときも 72h の算入判定が健全であること（界が night_band を前提にしない）"""
     import dataclasses as dc
@@ -35,7 +35,7 @@ def test_each_constraint_group_toggle():
 
 
 @pytest.mark.parametrize("rule,strict", [("weekly", False), ("weekly", True), ("4w4d", False)])
-def test_law_holiday_solved_and_verified(rule, strict):
+def test_law_holiday_solved_and_verified(rule: str, strict: bool) -> None:
     """層1の休日（労基法35条）: 各規則で求解でき、独立検証器が通る"""
     import dataclasses as dc
     I, eps = m.synthetic(T=31), m.Eps()
@@ -47,7 +47,7 @@ def test_law_holiday_solved_and_verified(rule, strict):
     assert verify.check(I, eps, A) == []
 
 
-def test_verify_detects_missing_weekly_holiday():
+def test_verify_detects_missing_weekly_holiday() -> None:
     """独立検証器が、休日のない週を検出すること（検出力の確認）"""
     I, eps = m.synthetic(T=31), m.Eps()
     ok, _, M, _, _ = m.solve(I, eps, time_limit=60)
