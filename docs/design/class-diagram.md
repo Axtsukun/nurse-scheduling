@@ -124,7 +124,6 @@ classDiagram
         +night_avg float
         +off_days list~int~
         +fixed dict~tuple, int~
-        +soft_off dict~int, list~
         +rules Rules
         +night_only list~int~
         +short_time list~int~
@@ -182,7 +181,6 @@ classDiagram
     class Eps {
         <<dataclass>>
         +night_delta int
-        +soft_off_viol int
         +weekend_spread_regular int
         +weekend_spread_part int
         +req_viol_ratio float
@@ -211,7 +209,7 @@ classDiagram
 | 計画 | `n_days`、`start_weekday`、`start_date`、`history`（前月末の実績）、`demand`（日別の需要区間 `(a, b, r)`。番ごとに一定で、1日を空きなく覆う） |
 | 看護師の属性 | `seniors`（夜勤リーダー資格者）、`night_only`（夜勤専従者）、`short_time`（短時間正職員）、`incl_threshold`（72時間ルールの算入閾値の個別上書き）、`off_days`（公休数）、`nurse_names` |
 | 規則・基準 | `rules`、`leader_cats`、`night_cats`、`night_avg` |
-| 個別の入力 | `fixed`（固定割当）、`soft_off`（希望休）、`req_off`・`req_shift`（個別要望） |
+| 個別の入力 | `fixed`（固定割当）、`req_off`（休み要望。希望休を含む）・`req_shift`（シフト要望） |
 | 表示 | `cat_names`（勤務区分名の上書き） |
 
 ## 図3 数理モデル
@@ -267,7 +265,6 @@ classDiagram
         +c_sym_break() Constraints
         +c_req_off() Constraints
         +c_req_shift() Constraints
-        +c_soft_off() Constraints
     }
     class NurseModel
     class registry {

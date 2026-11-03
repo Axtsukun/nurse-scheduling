@@ -133,8 +133,8 @@ def cover_intervals(I: Instance, d: int) -> list[tuple[frozenset, int]]:
 def symmetry_classes(I: Instance, mode: str) -> list[list[int]]:
     """同種の看護師の同値類（大きさ 2 以上のものだけ返す）。
 
-    - `exact`: 取れる値・公休数・資格・夜勤専従・閾値・履歴・固定割当・希望休がすべて一致（入れ替えが解の対称性になる。健全）
-    - `relaxed`: 取れる値・公休数・資格・夜勤専従・閾値のみ一致（履歴・固定割当・希望休の違いは無視。入れ替えは
+    - `exact`: 取れる値・公休数・資格・夜勤専従・閾値・履歴・固定割当・休み要望がすべて一致（入れ替えが解の対称性になる。健全）
+    - `relaxed`: 取れる値・公休数・資格・夜勤専従・閾値のみ一致（履歴・固定割当・休み要望の違いは無視。入れ替えは
       厳密な対称性ではないため、解を取りこぼす可能性がある不完全な絞り込み）
 
     Args:
@@ -149,7 +149,7 @@ def symmetry_classes(I: Instance, mode: str) -> list[list[int]]:
         if mode == "exact":
             key += (tuple(int(v) for v in I.history[n]),
                     tuple(sorted((d, s) for (m, d), s in I.fixed.items() if m == n)),
-                    tuple(sorted(I.soft_off.get(n, []))))
+                    tuple(sorted(I.req_off.get(n, []))))
         groups.setdefault(key, []).append(n)
     return [g for g in groups.values() if len(g) >= 2]
 

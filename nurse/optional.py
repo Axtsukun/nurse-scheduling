@@ -162,7 +162,8 @@ class OptionalConstraints(ModelKernel):
     # ---- 個別要望（ε制約） ----
     @constraint("req_off", "EPS", scope="optional", title="休み要望違反数上限")
     def c_req_off(self) -> Constraints:
-        """休み要望: Σ_{(n,d)∈Q^off} (1 − x[n,H+d,休]) ≤ ⌊ρ·|Q^off|⌋（ρ = eps.req_viol_ratio）
+        """休み要望（希望休を含む）: Σ_{(n,d)∈Q^off} (1 − x[n,H+d,休]) ≤ ⌊ρ·|Q^off|⌋（ρ = eps.req_viol_ratio）。
+        勤務者からの「この日は休みたい」という要望。守れなくてもよいが、違反は要望数の割合 ρ まで
 
         Returns:
             制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
@@ -185,13 +186,3 @@ class OptionalConstraints(ModelKernel):
         cap = math.floor(self.eps.req_viol_ratio * len(cells))
         return [Item(cp.sum([1 - self.x_taken(n, self.t(d), s) for n, d, s in cells]) <= cap,
                      (), (Param("要望数", len(cells)), Param("違反数", cap)))]
-
-    @constraint("soft_off", "EPS", scope="optional", title="希望休違反数上限")
-    def c_soft_off(self) -> Constraints:
-        """希望休: Σ_n Σ_{d∈R_n} (1 − x[n,H+d,休]) ≤ κ（κ = eps.soft_off_viol）
-
-        Returns:
-            制約の並び（CPMpy の式、または式を包んだ `Item`・`Aux`。`Constraints`）。"""
-        viol = [1 - self.x_taken(n, self.t(d), self.OFF) for n, ds in self.I.soft_off.items() for d in ds]
-        return [Item(cp.sum(viol) <= self.eps.soft_off_viol,
-                     (), (Param("要望数", len(viol)), Param("違反数", self.eps.soft_off_viol)))] if viol else []

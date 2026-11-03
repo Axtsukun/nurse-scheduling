@@ -112,7 +112,7 @@ def test_messages_of_every_group_with_start_date() -> None:
     assert first("night_band") == "night_band-0001  [夜勤回数範囲] N00 夜勤回数下限=5"
     assert named["night_band"][1].message == "N00 夜勤回数上限=8"
     assert first("weekend_spread") == "weekend_spread-0002  [土日勤務日数差上限] 正規 N00 土日勤務日数差=2"
-    assert first("soft_off") == "soft_off-0001  [希望休違反数上限] 要望数=60 違反数=10"
+    assert first("req_off") == "req_off-0001  [休み要望違反数上限] 要望数=60 違反数=18"     # 希望休（各人2日）も休み要望。上限は ⌊0.3×60⌋
 
 
 def test_spec_table_matches_the_implementation() -> None:
@@ -172,3 +172,20 @@ def test_nurse_and_category_names_come_from_the_instance() -> None:
     named = m.NurseModel(I, m.Eps()).build_named()
     assert next(x for x in named["offcount"]).message == "職員000 公休数=9"
     assert next(x for x in named["skill"]).message == "11/02 夕勤 リーダー数=1"
+
+
+def test_off_wishes_and_off_requests_are_one_kind_of_request() -> None:
+    """希望休と休み要望は、勤務者からの同じ種類の要望として `req_off` に一本化している（上限は割合 ρ だけで決まる）。
+    with_requests は、元の要望を残したまま追加する。"""
+    I = m.synthetic()
+    assert sum(map(len, I.req_off.values())) == 2 * I.n_nurses and not I.req_shift      # 基本の要望: 各人2日
+    assert not hasattr(m.Eps(), "soft_off_viol") and not hasattr(I, "soft_off")           # 件数指定（κ）は廃止
+    J = m.with_requests(I, rate=0.1)
+    for n, ds in I.req_off.items():
+        assert set(ds) <= set(J.req_off[n])                                              # 元の要望は残る
+    added = sum(map(len, J.req_off.values())) - sum(map(len, I.req_off.values()))
+    assert added == round(0.1 * I.n_nurses * I.n_days) // 2
+    cells = [(n, d) for n, ds in J.req_off.items() for d in ds] + [(n, d) for n, ds in J.req_shift.items() for d, _ in ds]
+    assert len(cells) == len(set(cells)) and not any(c in J.fixed for c in cells)        # 同じ日に重複せず、確定割当とも重ならない
+    K = m.with_requests(J, rate=0.1, seed=1)                                             # 続けて足すと、さらに加わる
+    assert sum(map(len, K.req_off.values())) > sum(map(len, J.req_off.values()))

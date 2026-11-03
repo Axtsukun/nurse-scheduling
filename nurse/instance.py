@@ -132,14 +132,13 @@ class Instance:
     night_avg: float                       # 夜勤回数の平均（ε帯の中心）
     off_days: list[int]                    # 公休数 F_n
     fixed: dict[tuple[int, int], int]      # 固定割当 (n, d) → s（確定休・有休）
-    soft_off: dict[int, list[int]]         # 希望休 R_n
     rules: Rules = field(default_factory=Rules)   # 層ごとのパラメータ
     # 看護師ごとのデータ（72時間ルール）
     night_only: list[int] = field(default_factory=list)     # 夜勤専従者（計算から除外）
     short_time: list[int] = field(default_factory=list)     # 短時間正職員（算入閾値が rules.domain.short_time_slots）
     incl_threshold: dict[int, int] = field(default_factory=dict)  # θ_n の個別上書き（スロット）
-    # 個別要望（ε制約で扱う。違反は eps.req_viol_ratio までの割合で許容）
-    req_off: dict[int, list[int]] = field(default_factory=dict)                # 休み要望 n → [d]
+    # 勤務者からの要望（ε制約で扱う。違反は eps.req_viol_ratio までの割合で許容。希望休も休み要望として入れる）
+    req_off: dict[int, list[int]] = field(default_factory=dict)                # 休み要望（希望休）n → [d]
     req_shift: dict[int, list[tuple[int, int]]] = field(default_factory=dict)  # シフト要望 n → [(d, s)]
     # 表示方針（診断のメッセージ。docs/design/constraint-message-spec.md）。求解には使わない
     start_date: date | None = None                 # 計画日0の暦の日付。指定すると MM/DD 表記、未指定なら「N日目(曜)」
@@ -207,10 +206,9 @@ class Instance:
 class Eps:
     """ε制約の閾値（緩和ループで調整）。symmetry_break だけは閾値ではなく探索を絞る技法の選択（実験用）"""
     night_delta: int = 1                   # δ: 夜勤回数の帯 [⌊avg⌋−δ, ⌈avg⌉+δ]
-    soft_off_viol: int = 10                # κ: 希望休違反数の上限
     weekend_spread_regular: int = 2        # 土日勤務日数の max−min の上限（正規職員）
     weekend_spread_part: int = 2           # 同（パート職員）
-    req_viol_ratio: float = 0.3            # 休み要望・シフト要望それぞれで許容する違反割合（違反数 ≤ ⌊ratio×要望数⌋）
+    req_viol_ratio: float = 0.3            # 休み要望（希望休を含む）・シフト要望それぞれで許容する違反割合（違反数 ≤ ⌊ratio×要望数⌋）
     symmetry_break: str = ""               # "" なし / "exact" 完全同種のみ（健全） / "relaxed" 属性が近い者（不完全）
 
 
