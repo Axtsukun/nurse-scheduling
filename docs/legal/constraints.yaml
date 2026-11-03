@@ -14,7 +14,7 @@
 - {id: LAW-CHILDCARE-OT,  class: A, hard: true,  confidence: medium, model: null,        status: none,        note: "育介法16条の8。3歳未満の所定外免除"}
 - {id: LAW-CHILDCARE-LIMIT, class: A, hard: true, confidence: medium, model: null,       status: none,        note: "育介法17条。月24h・年150h"}
 - {id: LAW-CHILDCARE-NIGHT, class: A, hard: true, confidence: medium, model: null,       status: none,        note: "育介法19条。深夜業の制限。例外要件は未確認"}
-- {id: LAW-PAID-LEAVE,    class: A, hard: true,  confidence: low,    model: fixed,       status: partial,     note: "39条。年5日。有休を固定割当で入れる（年5日の確保そのものは未検査）"}
+- {id: LAW-PAID-LEAVE,    class: A, hard: true,  confidence: low,    model: fixed,       status: implemented, note: "39条。有休の日数管理は利用者が行う（決定）。システムは入力された取得日を固定割当（hard）として受け取るだけで、付与日数・比例付与・年5日の確保は検査しない"}
 - {id: LAW-NIGHT-CHECKUP, class: A, hard: false, confidence: medium, model: null,        status: n-a,         note: "安衛則45条。運用上の義務"}
 - {id: REIMB-NIGHT-2,     class: B, hard: true,  confidence: medium, model: cover,       status: partial,     note: "夜勤は看護師1人含む2人以上。cover で間接的"}
 - {id: REIMB-72H,         class: B, hard: true,  confidence: high,   model: 72h,         status: implemented, note: "月平均夜勤72h以下。病棟平均"}
