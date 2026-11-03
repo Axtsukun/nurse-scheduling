@@ -7,6 +7,7 @@ from collections.abc import Collection, Iterable
 import cpmpy as cp
 from cpmpy.expressions.core import Expression
 from cpmpy.expressions.variables import NDVarArray
+from .codes import InputError
 from .instance import Instance, Eps, OFF_NAME
 from .message import Nurse, Day, Shift, Param
 from .registry import REGISTRY, ConstraintSpec, Item, Aux, Named, Constraints, ConstraintList, constraint, selected_constraints
@@ -67,6 +68,23 @@ class ModelKernel:
             決定変数 `x[n,t,s]`。s が D_n に無ければ `None`。"""
         j = self.col[n].get(s)
         return None if j is None else self.xv[n][t, j]
+
+    def x_taken(self, n: int, t: int, s: int) -> Expression:
+        """x[n,t,s]。その値を取れること（s ∈ D_n）が前提の制約で使う。取れなければ `InputError`（None を式に混ぜない）。
+
+        Args:
+            n: 看護師の添字。
+            t: 時点。
+            s: 勤務の添字。
+
+        Returns:
+            決定変数 `x[n,t,s]`。
+        """
+        v = self.x(n, t, s)
+        if v is None:
+            raise InputError(f"看護師 {n} は勤務 {self.I.shifts[s].name!r} を取れない（取れる値の集合に無い）が、"
+                             f"時点 {t} でその値を前提とする制約（要望など）がある")
+        return v
 
     def xs(self, n: int, t: int, ss: Iterable[int]) -> list[Expression]:
         """{x[n,t,s] : s ∈ ss ∩ D_n}

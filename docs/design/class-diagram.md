@@ -232,6 +232,7 @@ classDiagram
         +active frozenset~str~
         +t(d) int
         +x(n, t, s) Expression | None
+        +x_taken(n, t, s) Expression
         +xs(n, t, ss) list
         +work(n, t) Expression
         +wvec(n) NDVarArray

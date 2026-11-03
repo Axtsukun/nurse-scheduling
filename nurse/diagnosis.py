@@ -252,11 +252,13 @@ def diagnose(I: Instance, eps: Eps, time_limit: float | None = None, mus_solver:
     if soft_items is None:                                              # 矛盾は確定しているが、原因を特定できなかった
         return Diagnosis(CONFLICT, state, [], False, times, solver, False)
     t1 = time.perf_counter()
-    involved: list[Named] | None = []                                                   # soft の矛盾に関わる前提だけに絞る
+    involved: list[Named] = []                                          # soft の矛盾に関わる前提だけに絞る
     if given:
-        involved, minimal_given = run(given_exprs, background + [x.expr for x in soft_items], given)
-        if involved is None:                                            # 絞れなければ前提は載せない（soft の説明だけ）
-            involved, minimal_given = [], False
+        found, minimal_given = run(given_exprs, background + [x.expr for x in soft_items], given)
+        if found is None:                                               # 絞れなければ前提は載せない（soft の説明だけ）
+            minimal_given = False
+        else:
+            involved = found
         minimal = minimal and minimal_given
     times["mus_given"] = time.perf_counter() - t1
     items = sorted(involved + soft_items, key=lambda x: position[id(x.expr)])
