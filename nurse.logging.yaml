@@ -22,6 +22,6 @@ program:                            # ① プログラム全体のログ（親�
 engine:                             # ② エンジン求解詳細ログ（子）
   level: INFO                       # WARNING 以上にすると、ソルバーの詳細ログを出さない（求解も変わらない）
   file: nurse_engine.log
-  console: true
+  console: true                     # 標準出力にも出す（開発者がデバッグ時に見る用。画面を静かにするなら false。ファイルには残る）
   propagate: true                   # 親（①）の出力にも流す（①の1本で時系列に追える。標準出力は二重にならない）。
                                     # false にすると、①は処理の流れだけの短いログになり、②は専用の出力だけになる

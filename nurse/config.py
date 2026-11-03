@@ -78,7 +78,7 @@ def _read(p: Path, origin: str) -> Settings:
     Returns:
         読み込んだ設定。"""
     settings = parse_properties(p.read_text(encoding="utf-8"), str(p))
-    log.info("設定ファイルを読み込み: %s（%s）→ %s", p, origin, settings)
+    log.info("設定ファイルを読み込み: %s（%s）→ %s", p, origin, settings, stacklevel=2)
     return settings
 
 

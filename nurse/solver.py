@@ -55,7 +55,7 @@ def solve(I: Instance, eps: Eps, time_limit: float | None = None, workers: int =
     t2 = time.perf_counter()
     log.info("ソルバーへの変換 完了: %.2fs（%s）", t2 - t1, solver)
     attach_engine_log(solver, s)                                   # CP-SAT の標準ログを nurse.engine へ流す
-    log.info("求解プロセス開始（ソルバーの詳細ログは nurse.engine）")
+    log.info("求解プロセス開始")
     if solver == "ortools":
         ok = s.solve(time_limit=time_limit, num_workers=workers, linearization_level=lin_level)
     else:

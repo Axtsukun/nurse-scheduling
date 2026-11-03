@@ -227,7 +227,7 @@ def test_debug_level_lists_individual_constraints_and_variables(tmp_path: pathli
     lg.setup_logging(_config(tmp_path, program="level: DEBUG, console: false"))
     res = m.solve(m.synthetic(start_date=__import__("datetime").date(2026, 11, 2)), m.Eps(), time_limit=60)
     log = _read(tmp_path, "nurse.log")
-    assert len(re.findall(r"nurse\.kernel\._log_definitions: 制約: ", log)) == sum(res.counts.values())     # 個別の制約が全件
+    assert len(re.findall(r"nurse\.kernel\.build_named: 制約: ", log)) == sum(res.counts.values())     # 個別の制約が全件
     assert "制約: cover-0001  [人数制約下限] 11/02 00:00 - 11/02 00:30 勤務者数=3" in log
     assert re.search(r"決定変数 x0: 形 \(35, \d+\)（取れる値 \d+ 個）", log)                                  # 個別の変数
     found = re.search(r"補助変数の総数: (\d+)", log)
@@ -278,3 +278,18 @@ def test_cli_with_an_invalid_log_config_is_an_input_error(tmp_path: pathlib.Path
     assert m.main(["--log-config", str(bad)]) == ReturnCode.INPUT_ERROR
     assert "asctime" in capsys.readouterr().err
     assert m.main(["--log-config", str(tmp_path / "none.yaml")]) == ReturnCode.INPUT_ERROR
+
+
+def test_method_column_is_the_public_function_not_a_helper(tmp_path: pathlib.Path) -> None:
+    """ヘルパー関数（`_` で始まる）のログは、呼び出し元の公開の関数のメソッド名で出す（`stacklevel`）。
+    求解・診断（MUS）・設定ファイルの読み込みのログで、メソッド欄に内部の関数名が出ない。"""
+    lg.setup_logging(_config(tmp_path, program="level: DEBUG, console: false", engine="level: INFO, console: false"))
+    I = m.synthetic()
+    m.load_settings(ROOT / "nurse.properties")
+    m.diagnose(dc.replace(I, off_days=[I.n_days + 1] + I.off_days[1:]), m.Eps(), time_limit=60)         # 求解・診断・MUS
+    log = _read(tmp_path, "nurse.log")
+    methods = {x.split(" ")[3].rstrip(":") for x in log.splitlines()}
+    assert {"nurse.kernel.build_named", "nurse.diagnosis.diagnose", "nurse.solver.solve",
+            "nurse.config.load_settings", "nurse.logger.setup_logging"} <= methods
+    private = {x for x in methods if re.search(r"\._[a-z]", x)}                                       # `__init__` などの特殊メソッドは除く
+    assert not private, private
