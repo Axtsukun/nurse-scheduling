@@ -1,0 +1,26 @@
+# ログの設定（YAML または JSON）。CLI（nurse_csp.py）が起動時に読む。
+# 探す順: --log-config、環境変数 NURSE_LOGGING、このファイル。どれも無ければ既定値。
+#
+# ログは「親 nurse（①プログラム全体）」と「子 nurse.engine（②エンジン求解詳細）」の2系統で、それぞれ標準出力とファイルに出す。
+#   ① ファイル入出力、制御プロセス、変数宣言・制約定義（個別内容は DEBUG、総数は INFO）、求解プロセス、ステータス、結果（MUS を含む）
+#   ② ソルバー（CP-SAT）の標準ログ
+# メッセージには、タイムスタンプ（asctime）・メソッド（funcName）・メッセージ（message）を必ず含める（無い書式はエラー）。
+
+log_dir: logs                       # ログの出力先ディレクトリ（実行時のカレントディレクトリからの相対）
+format: "%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s.%(funcName)s: %(message)s"
+datefmt: "%Y-%m-%d %H:%M:%S"
+
+rotation:                           # ファイルローテーション（RotatingFileHandler）。省略した値は既定
+  max_bytes: 10485760               # 1ファイルの最大バイト数（10MB）
+  backup_count: 5                   # 残す世代数
+
+program:                            # ① プログラム全体のログ（親）
+  level: INFO                       # 個別の変数・制約まで出すときは DEBUG
+  file: nurse.log
+  console: true                     # 標準出力にも出す
+
+engine:                             # ② エンジン求解詳細ログ（子）
+  level: INFO                       # WARNING 以上にすると、ソルバーの詳細ログを出さない（求解も変わらない）
+  file: nurse_engine.log
+  console: true
+  propagate: false                  # true にすると、親（①）の出力にも流す

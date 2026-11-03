@@ -49,6 +49,7 @@ nav:
       - nurse.domain: api/nurse.domain.md
       - nurse.instance: api/nurse.instance.md
       - nurse.kernel: api/nurse.kernel.md
+      - nurse.logger: api/nurse.logger.md
       - nurse.law: api/nurse.law.md
       - nurse.message: api/nurse.message.md
       - nurse.model: api/nurse.model.md

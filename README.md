@@ -33,7 +33,7 @@ pip install -r requirements.txt                        # cpmpy, ortools, exact, 
 
 python nurse_csp.py            # 合成インスタンス（30人・30日）を1問求解し、勤務表の先頭を表示
 python evaluate.py             # 求解 → 独立検証 → 評価（人数・勤務回数・72時間・土日・要望）を表示
-pytest -q                      # 全テスト（124件、約1分40秒）
+pytest -q                      # 全テスト（152件、約1分40秒）
 ```
 
 どちらのスクリプトも `--lin`（`linearization_level`）と `--time-limit` を取る。`evaluate.py --requests 0.10` で個別要望を全セルの1割だけ加える。
@@ -48,11 +48,13 @@ nurse-scheduling/
 ├── CLAUDE.md               Claude Code 向けの文脈（設計方針・表記規約・制約の足し方）
 ├── requirements.txt
 ├── nurse.properties        設定ファイル（求解・MUS の時間制限。既定は各30秒）
+├── nurse.logging.yaml      ログの設定（YAML。標準出力とファイル、親子2系統、ローテーション。4.8 節）
 │
 ├── nurse/                  エンジン本体（パッケージ）
 │   ├── __init__.py         公開 API をまとめて再エクスポート
 │   ├── codes.py            リターンコード（ReturnCode）と例外（InputError など）
 │   ├── config.py           設定ファイル（properties）の読み込み
+│   ├── logger.py           ログの設定（標準出力とファイル。親 nurse・子 nurse.engine の2系統）
 │   ├── instance.py         入力データ・層ごとのパラメータ・インスタンスへの単純な問い合わせ
 │   ├── solution.py         解（割当表）の読み取り部品（検証器と評価が共有）
 │   ├── preprocess.py       時刻データから係数・集合・窓を作る純Python（ソルバー不要）
@@ -77,6 +79,8 @@ nurse-scheduling/
 ├── bench_requests.py       個別要望（休み要望・シフト要望）を足した影響
 │
 ├── tests/
+│   ├── conftest.py         共通の設定（ログの出力先をテストごとの一時ディレクトリにする）
+│   ├── test_logger.py      ログ（設定の検証・親子2系統の出力先・必須項目・ローテーション・各処理のログ）  29件
 │   ├── test_preprocess.py  前処理の厳密性（総当たりと照合。ソルバー不要）        6件
 │   ├── test_layers.py      層構成・根拠ID・休日の窓・検査関数の対応・パラメータ検証・取れない勤務への要望の検出  40件
 │   ├── test_named.py       制約の名前（ID・クラス名・メッセージ・遅延生成・全群の一覧）・要望の一本化  17件
@@ -248,6 +252,7 @@ flowchart TB
         solution["«module»<br/>solution"]
         synthetic["«module»<br/>synthetic"]
         config["«module»<br/>config"]
+        logger["«module»<br/>logger"]
         instance["«module»<br/>instance"]
         codes["«module»<br/>codes"]
     end
@@ -259,6 +264,7 @@ flowchart TB
     diagnosis -.-> solver
     solver -.-> model
     solver -.-> config
+    solver -.-> logger
     model -.-> law
     model -.-> domain
     model -.-> optional
@@ -276,6 +282,7 @@ flowchart TB
     synthetic -.-> instance
     instance -.-> codes
     config -.-> codes
+    logger -.-> codes
 ```
 
 Mermaid には UML のパッケージ図がないので、flowchart で UML の表記（`«package»`・`«module»`、破線の依存矢印）に合わせている。矢印は「依存する側 → 依存される側」（`import` している側から、されている側へ）。
@@ -293,6 +300,7 @@ Mermaid には UML のパッケージ図がないので、flowchart で UML の�
 | 0 | `codes` | リターンコード `ReturnCode` と例外（`InputError` など） | — | — |
 | 1 | `config` | 設定ファイル `nurse.properties` の読み込み（`Settings`） | `codes` | — |
 | 1 | `instance` | 入力データ `Instance`・層ごとのパラメータ・`Eps` | `codes` | numpy |
+| 1 | `logger` | ログの設定（標準出力とファイル。親 `nurse`・子 `nurse.engine` の2系統。4.8 節） | `codes` | yaml |
 | 2 | `message` | 制約メッセージの部品と整形器 `Renderer` | `instance` | — |
 | 2 | `preprocess` | 時刻データから係数・集合・窓を作る純Python | `codes`, `instance` | — |
 | 2 | `solution` | 解（割当表）の読み取り部品 | `instance` | — |
@@ -303,8 +311,8 @@ Mermaid には UML のパッケージ図がないので、flowchart で UML の�
 | 5 | `law` | 層1 労働法規の制約（`LawConstraints`） | `codes`, `kernel`, `message`, `preprocess`, `registry` | cpmpy |
 | 5 | `optional` | 層3 努力義務・要望の制約（`OptionalConstraints`） | `instance`, `kernel`, `message`, `preprocess`, `registry` | cpmpy |
 | 6 | `model` | `NurseModel`（上の3つの合成） | `domain`, `law`, `optional` | — |
-| 7 | `solver` | `solve`・`SolveResult`・`roster` | `config`, `instance`, `model` | cpmpy, numpy |
-| 8 | `diagnosis` | 解けないときの診断（`diagnose`・`Diagnosis`） | `codes`, `config`, `instance`, `registry`, `solver` | cpmpy |
+| 7 | `solver` | `solve`・`SolveResult`・`roster` | `config`, `instance`, `logger`, `model` | cpmpy, numpy |
+| 8 | `diagnosis` | 解けないときの診断（`diagnose`・`Diagnosis`） | `codes`, `config`, `instance`, `logger`, `registry`, `solver` | cpmpy |
 
 ### 3.5 クラス図（コア部分）
 
@@ -509,6 +517,39 @@ mkdocs build --strict         # _site/ に出力。警告があれば失敗す�
 - **モジュールを足したとき**: `docs/api/<モジュール名>.md` に `# \`名前\`` と `::: 名前` を書き、`mkdocs.yml` の nav に足す（足し忘れは `tests/test_docs.py` が検出する）。
 - **用語**: *docstring* = 関数・クラスの先頭に書く説明文。*MkDocs* = Markdown から静的サイトを作るツール。*Material* = その見た目のテーマ（Mermaid の図もこれで描画される）。*`--strict`* = 警告（リンク切れなど）もエラー扱いにするビルド。
 
+### 4.8 ログ
+
+ログは、標準出力とファイルの**両方**に出し、**親子の2系統**に分ける。設定は YAML か JSON（`nurse.logging.yaml`）で与える。
+
+| 系統 | ロガー名 | 内容 | ファイル（既定） |
+|---|---|---|---|
+| **①プログラム全体**（親） | `nurse`（各モジュールは `nurse.solver` など、この子孫） | ファイル入出力（設定ファイルの読み込み・ログ設定）、制御プロセス（起動・事前検査・終了）、**変数宣言**（総数は INFO、個別内容は DEBUG）、**制約定義**（群ごとの本数と総数は INFO、個別の制約は DEBUG）、**補助変数**（総数と種類別は INFO、個別は DEBUG）、求解プロセスとステータス、結果（診断のステータス・MUS） | `logs/nurse.log` |
+| **②エンジン求解詳細**（子） | `nurse.engine` | ソルバー（CP-SAT）の標準ログ | `logs/nurse_engine.log` |
+
+- **必須項目**: すべての行に、**タイムスタンプ・メソッド・メッセージ**を含める（例: `2026-11-03 07:53:06.574 [INFO] nurse.solver.solve: 求解 終了: ok=True …`）。設定の `format` から、`%(asctime)s`・`%(funcName)s`・`%(message)s` のどれかを外すと `InputError`（終了コード30）。②の行は、メソッド欄にソルバー名が入る（`nurse.engine.CP-SAT`）。
+- **ファイルローテーション**: `RotatingFileHandler`。既定は 10MB × 5世代（`rotation` で変更できる）。
+- **設定ファイル**: `--log-config` > 環境変数 `NURSE_LOGGING` > リポジトリ直下の `nurse.logging.yaml` > 既定値の順に探す。キー・値は検証し、未知のキーや不正な値は `InputError`。主なキーは次のとおり。
+
+```yaml
+log_dir: logs                    # 出力先ディレクトリ（実行時のカレントディレクトリからの相対）
+rotation: {max_bytes: 10485760, backup_count: 5}
+program: {level: INFO, file: nurse.log, console: true}                           # ①
+engine:  {level: INFO, file: nurse_engine.log, console: true, propagate: false}  # ②
+```
+
+- **親子の関係**: `nurse.engine` は `nurse` の子。既定では、②を①へ流さない（`propagate: false`。①に CP-SAT の数百行が混ざらないように）。`true` にすると①の出力にも流れる。②を出さないなら `engine.level: WARNING`（ソルバーの詳細ログを有効にしないので、求解も変わらない）。
+- **個別の変数・制約まで見るとき**: `program.level: DEBUG`。制約が数千本あるモデルでは、行数が大きくなる。
+- **ライブラリとして使うとき**: `setup_logging()` を呼ぶまで、何も出さない（`nurse` に `NullHandler` を付けてある）。CLI（`nurse_csp.py`）は起動時に呼ぶ。
+
+```python
+from nurse import setup_logging
+setup_logging("my.logging.yaml")     # 省略すると、上の順に探す
+```
+
+- **限界**: ②に出るのは CP-SAT（求解と、診断の最初の求解）のログ。MUS を求める **exact**（子プロセス）の内部ログは出さず、①に MUS の開始・終了・件数・最小かを残す。
+- **CPMpy の挙動への対処**: CPMpy は、標準出力が差し替えられているとき（pytest・IPython・リダイレクト）、`solve(log_search_progress=True)` のログのコールバックを `print` に上書きする。そのため CP-SAT のパラメータを直接設定して、②へ取り込んでいる。
+- **用語**: *ロガー* = ログを出す名前つきの窓口（親子関係を持つ）。*ハンドラ* = ログの出力先（標準出力・ファイル）。*ローテーション* = ファイルが大きくなったら、古いログを番号つきの別ファイルへ退避して、新しく書き始めること。
+
 ## 5. 制約を足すには
 
 1. 該当する層のモジュール（`law.py` / `domain.py` / `optional.py`）に、`@constraint(名前, layer, relaxable, scope, source, title)` を付けたメソッドを書く。`list[Expression | Item | Aux]` を返し、補助変数はその中で作る。個別の規則は `Item(式, 対象, パラメータ)`（文字列は組み立てず、`message.py` の部品と `Param` を渡す）、補助変数の定義式は `Aux(式)` で包む。`title` は短い制約クラス名。
@@ -526,6 +567,7 @@ mkdocs build --strict         # _site/ に出力。警告があれば失敗す�
 | ファイル | 件数 | 求解 | 見ているもの |
 |---|---|---|---|
 | `test_preprocess.py` | 6 | しない | 夜勤時間の係数、勤務間隔の閾値分解、人数制約の区間化が総当たりと完全一致。人数制約の区間が基本区間で重ならないこと、需要の入力検査 |
+| `test_logger.py` | 29 | する | ログ設定（YAML / JSON）の検証、親 `nurse`・子 `nurse.engine` の出力先（標準出力・ファイル）、行ごとの必須項目（タイムスタンプ・メソッド・メッセージ）、ローテーション、変数・制約・求解・診断（MUS）・設定ファイル入力のログの内容、ソルバーのログを標準出力の差し替えに左右されず取り込むこと |
 | `test_layers.py` | 40 | 一部 | 登録した制約と `constraints.yaml` の整合、オフにできない制約の保護、算入閾値、休日の窓（曜日7通り×起算2通り×日数2通り）、パラメータ検証、検査関数の対応、`night_band` オフ時の界、`SolveResult`、週末の定義、取れない勤務への要望が `InputError` になること |
 | `test_solve.py` | 7 | する | 可解性と独立検証（`lin` 0/1）、層2・層3を1つずつ外した求解、休日の各規則、検証器が違反を検出すること |
 | `test_named.py` | 17 | しない | `build` と `build_named` が同じ式、全群の短い一意なクラス名、**ID が全制約で一意・群内で連続**、補助変数・背景はメッセージなし、全 soft 制約のメッセージ、**メッセージの遅延生成**、全群のメッセージの一覧（開始日あり・なし）、人数制約が基本区間・翌日 00:00 で表れること、仕様書 8 節の表が実装の出力と一致すること |

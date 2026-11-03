@@ -4,13 +4,19 @@
 """
 from __future__ import annotations
 from collections.abc import Collection, Iterable
+import logging
+import re
 import cpmpy as cp
 from cpmpy.expressions.core import Expression
 from cpmpy.expressions.variables import NDVarArray
+from cpmpy.transformations.get_variables import get_variables
 from .codes import InputError
 from .instance import Instance, Eps, OFF_NAME
 from .message import Nurse, Day, Shift, Param
 from .registry import REGISTRY, ConstraintSpec, Item, Aux, Named, Constraints, ConstraintList, constraint, selected_constraints
+
+
+log = logging.getLogger(__name__)
 
 
 class ModelKernel:
@@ -42,6 +48,9 @@ class ModelKernel:
             self.dom.append(Dn)
             self.col.append({s: j for j, s in enumerate(Dn)})
             self.xv.append(cp.boolvar(shape=(self.H + self.T, len(Dn)), name=f"x{n}"))
+            log.debug("決定変数 x%d: 形 %s（取れる値 %d 個）", n, self.xv[n].shape, len(Dn))
+        log.info("決定変数 x を宣言: 看護師 %d 人 × 時点 %d（履歴 %d + 計画 %d）、変数の総数 %d",
+                 I.n_nurses, self.H + self.T, self.H, self.T, sum(v.size for v in self.xv))
         self._work: dict[tuple[int, int], object] = {}
         self.active: frozenset[str] = frozenset(selected_constraints(I))  # build() で有効になった制約名
 
@@ -166,8 +175,36 @@ class ModelKernel:
             `{制約名: [Named…]}`。"""
         names = selected_constraints(self.I, enabled)
         self.active = frozenset(names)
-        return {nm: [self._named(REGISTRY[nm], i, c)
-                     for i, c in enumerate(getattr(self, REGISTRY[nm].method)())] for nm in names}
+        built = {nm: [self._named(REGISTRY[nm], i, c)
+                      for i, c in enumerate(getattr(self, REGISTRY[nm].method)())] for nm in names}
+        self._log_definitions(built)
+        return built
+
+    def _log_definitions(self, built: dict[str, list[Named]]) -> None:
+        """定義した制約（個別内容と総数）と、制約の中で宣言された補助変数（個別内容と総数）をログに残す。
+        個別内容は DEBUG、総数は INFO。ログが無効なら、数える処理もしない。
+
+        Args:
+            built: `build_named` が作った `{制約名: [Named…]}`。"""
+        if not log.isEnabledFor(logging.INFO):
+            return
+        for nm, items in built.items():
+            log.info("制約を定義: %s [%s] %d 本（うち hard %d）", nm, REGISTRY[nm].title, len(items), sum(x.hard for x in items))
+        log.info("制約の総数: %d 本（%d 群）", sum(map(len, built.values())), len(built))
+        x_ids = {id(v) for xv in self.xv for v in xv.flat}
+        aux = {id(v): v for items in built.values() for x in items for v in get_variables(x.expr) if id(v) not in x_ids}
+        kinds: dict[str, int] = {}
+        for v in aux.values():
+            found = re.match(r"[A-Za-z]+", v.name)
+            kind = found.group(0) if found else "?"
+            kinds[kind] = kinds.get(kind, 0) + 1
+        log.info("補助変数の総数: %d（種類別 %s）", len(aux), ", ".join(f"{k}={n}" for k, n in sorted(kinds.items())) or "なし")
+        if log.isEnabledFor(logging.DEBUG):
+            for items in built.values():
+                for x in items:
+                    log.debug("制約: %s%s", x.line, "（hard）" if x.hard else "")
+            for v in sorted(aux.values(), key=lambda v: v.name):
+                log.debug("補助変数: %s", v.name)
 
     def _named(self, spec: ConstraintSpec, i: int, c: Expression | Item | Aux) -> Named:
         """制約メソッドの戻り値の1要素を Named にする（i は群内の0始まりの位置）。
