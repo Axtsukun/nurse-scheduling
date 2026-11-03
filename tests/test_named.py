@@ -4,6 +4,7 @@ import datetime
 import re
 import sys, pathlib
 import pytest
+from cpmpy.transformations.get_variables import get_variables
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import nurse_csp as m
 from nurse.registry import Aux, Item
@@ -189,3 +190,22 @@ def test_off_wishes_and_off_requests_are_one_kind_of_request() -> None:
     assert len(cells) == len(set(cells)) and not any(c in J.fixed for c in cells)        # 同じ日に重複せず、確定割当とも重ならない
     K = m.with_requests(J, rate=0.1, seed=1)                                             # 続けて足すと、さらに加わる
     assert sum(map(len, K.req_off.values())) > sum(map(len, J.req_off.values()))
+
+
+def test_build_named_reuses_the_result_for_the_same_enabled_set() -> None:
+    """同じ有効な制約の集合なら、build_named は最初の結果（Named と式）を再利用する。求解（build）と診断が同じ式を共有し、
+    補助変数も作り直さない。有効な集合が違えば別に作る。"""
+    M = m.NurseModel(m.synthetic(), m.Eps())
+    a, b = M.build_named(), M.build_named()
+    assert a is not b and all(a[g] is not b[g] for g in a)                          # 辞書・リストは呼び出しごとの新しい入れ物
+    assert all(x is y for g in a for x, y in zip(a[g], b[g]))                       # 中の Named（と式）は共有
+    plain = M.build()
+    assert all(p is x.expr for g in a for p, x in zip(plain[g], a[g]))              # build() も同じ式
+    aux = lambda named: {id(v) for g in named for x in named[g] if x.hard for v in get_variables(x.expr)}
+    assert aux(a) == aux(M.build_named())                                           # 補助変数も同じ（作り直さない）
+    mandatory = {nm for nm, sp in m.REGISTRY.items() if sp.scope in m.MANDATORY}
+    sub = M.build_named(mandatory)                                                  # 有効な集合が違えば、別に作る
+    assert set(sub) == mandatory and sub["struct"][0] is not a["struct"][0]
+    assert M.build_named(mandatory)["struct"][0] is sub["struct"][0]                # 同じ集合なら、また再利用
+    full = M.build_named()
+    assert full["cover"][0] is a["cover"][0] and M.is_active("cover")               # 元の結果も残り、有効な集合の記録も戻る
