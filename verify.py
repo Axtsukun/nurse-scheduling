@@ -328,24 +328,8 @@ def check_weekend_spread(I: Instance, eps: Eps, A: Assignment, full: list[list[i
     return err
 
 
-def check_soft_off(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
-    """希望休の違反数 ≤ κ
-
-    Args:
-        I: 入力データ。
-        eps: ε 制約（品質要件）の閾値。
-        A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
-        full: 履歴（前月末）を前置した勤務列。時点 t = H + 計画日 d。
-
-    Returns:
-        違反の説明文のリスト（空なら充足）。"""
-    S = I.shifts
-    viol = sum(1 for n, ds in I.soft_off.items() for d in ds if S[A[n][d]].name != OFF_NAME)
-    return [f"希望休違反 {viol} > {eps.soft_off_viol}"] if viol > eps.soft_off_viol else []
-
-
 def check_req_off(I: Instance, eps: Eps, A: Assignment, full: list[list[int]]) -> list[str]:
-    """休み要望の違反数 ≤ ⌊ρ·要望数⌋
+    """休み要望（希望休を含む）の違反数 ≤ ⌊ρ·要望数⌋
 
     Args:
         I: 入力データ。
@@ -388,7 +372,7 @@ CHECKS: dict[str, Check] = {
     "offcount": check_offcount, "weekend": check_weekend, "night_band": check_night_band,
     "cover": check_cover, "skill": check_skill, "72h": check_72h,
     "weekend_spread": check_weekend_spread,
-    "soft_off": check_soft_off, "req_off": check_req_off, "req_shift": check_req_shift,
+    "req_off": check_req_off, "req_shift": check_req_shift,
 }
 
 

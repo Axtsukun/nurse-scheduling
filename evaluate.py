@@ -6,7 +6,7 @@
   3. パート職員の同上
   4. 72時間ルールでの平均夜勤時間（算入者の延べ夜勤時間 / 算入者数）
   5. 土日勤務の偏り（人ごとの土日勤務日数・勤務週末数・平日との勤務率の差）
-  6. 要望の充足（既存の希望休・休み要望・シフト要望の件数と充足率）
+  6. 要望の充足（休み要望（希望休を含む）・シフト要望の件数と充足率）
 
 使い方: python evaluate.py        （合成インスタンスを求解して評価）
 """
@@ -144,13 +144,12 @@ def request_stats(I: Instance, A: Assignment) -> dict:
         A: 割当表。`A[n][d]` は計画日 d に看護師 n が就く勤務の添字 s。
 
     Returns:
-        `希望休(既存)`・`休み要望`・`シフト要望` をキーに、`total`（件数）・`met`（充足数）・`rate`（充足率）を持つ辞書を値にした辞書。"""
+        `休み要望`・`シフト要望` をキーに、`total`（件数）・`met`（充足数）・`rate`（充足率）を持つ辞書を値にした辞書。"""
     S = I.shifts
-    off = [S[A[n][d]].name == OFF_NAME for n, ds in I.soft_off.items() for d in ds]
     roff = [S[A[n][d]].name == OFF_NAME for n, ds in I.req_off.items() for d in ds]
     rsh = [A[n][d] == s for n, ds in I.req_shift.items() for d, s in ds]
     pack = lambda v: dict(total=len(v), met=sum(v), rate=(sum(v) / len(v)) if v else float("nan"))
-    return {"希望休(既存)": pack(off), "休み要望": pack(roff), "シフト要望": pack(rsh)}
+    return {"休み要望": pack(roff), "シフト要望": pack(rsh)}
 
 
 def evaluate(I: Instance, A: Assignment) -> dict:
