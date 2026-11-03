@@ -33,7 +33,7 @@ pip install -r requirements.txt                        # cpmpy, ortools, exact, 
 
 python nurse_csp.py            # 合成インスタンス（30人・30日）を1問求解し、勤務表の先頭を表示
 python evaluate.py             # 求解 → 独立検証 → 評価（人数・勤務回数・72時間・土日・要望）を表示
-pytest -q                      # 全テスト（158件、約1分40秒）
+pytest -q                      # 全テスト（159件、約1分40秒）
 ```
 
 どちらのスクリプトも `--lin`（`linearization_level`）と `--time-limit` を取る。`evaluate.py --requests 0.10` で個別要望を全セルの1割だけ加える。
