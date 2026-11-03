@@ -16,10 +16,13 @@ mus.time_limit = 30       # MUS（矛盾の原因の絞り込み）1回あたり
 
 `solve()` と `diagnose()` は、time_limit / mus_time_limit を省略したときにこの設定を使う（引数で渡せば引数が優先）。"""
 from __future__ import annotations
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from .codes import InputError
+
+log = logging.getLogger(__name__)
 
 DEFAULT_PATH = Path(__file__).resolve().parents[1] / "nurse.properties"
 ENV_VAR = "NURSE_PROPERTIES"
@@ -65,6 +68,20 @@ def parse_properties(text: str, source: str = "<text>") -> Settings:
     return Settings(**{KEYS[k]: v for k, v in found.items()})
 
 
+def _read(p: Path, origin: str) -> Settings:
+    """設定ファイルを読んで `Settings` にする（ファイル入力をログに残す）。
+
+    Args:
+        p: 設定ファイルのパス。
+        origin: ログに出す、どこで指定されたパスか（引数・環境変数・リポジトリ直下）。
+
+    Returns:
+        読み込んだ設定。"""
+    settings = parse_properties(p.read_text(encoding="utf-8"), str(p))
+    log.info("設定ファイルを読み込み: %s（%s）→ %s", p, origin, settings, stacklevel=2)
+    return settings
+
+
 def load_settings(path: str | os.PathLike | None = None) -> Settings:
     """設定を読む（呼ぶたびに読み直す。ファイルを書き換えると次の呼び出しから反映される）
 
@@ -78,7 +95,8 @@ def load_settings(path: str | os.PathLike | None = None) -> Settings:
         p = Path(explicit)
         if not p.is_file():
             raise InputError(f"設定ファイルが見つからない: {p}（{'引数' if path is not None else '環境変数 ' + ENV_VAR}）")
-        return parse_properties(p.read_text(encoding="utf-8"), str(p))
+        return _read(p, "引数" if path is not None else f"環境変数 {ENV_VAR}")
     if DEFAULT_PATH.is_file():
-        return parse_properties(DEFAULT_PATH.read_text(encoding="utf-8"), str(DEFAULT_PATH))
+        return _read(DEFAULT_PATH, "リポジトリ直下")
+    log.info("設定ファイルなし: 既定値を使う（%s）", Settings())
     return Settings()

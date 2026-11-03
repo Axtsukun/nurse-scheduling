@@ -22,6 +22,7 @@
 - CPMpy は制約式に名前を付けられないので、式の id から Named（制約群・日本語ラベル）を引き戻す。"""
 from __future__ import annotations
 from dataclasses import dataclass, field
+import logging
 import multiprocessing
 from multiprocessing.connection import Connection
 import time
@@ -32,12 +33,16 @@ from cpmpy.tools.explain.utils import make_assump_model
 from .codes import ReturnCode, SolverUnavailableError, InternalError
 from .config import load_settings
 from .instance import Instance, Eps
+from .logger import attach_engine_log
 from .registry import REGISTRY, MANDATORY, TOGGLEABLE, Named
 from .solver import solve, SOLVE_SOLVER
 
 MUS_SOLVER = "exact"                       # 決定事項: MUS の計算は exact。変更する場合はユーザーに確認する
 FEASIBLE, TIMEOUT, CONFLICT = "feasible", "timeout", "conflict"
 SCOPE_NAMES = {"core": "カーネル", "law": "層1 労働法規", "domain": "層2 病院・看護職共通", "optional": "層3 任意"}
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -116,6 +121,7 @@ def _mus_in_child(soft: list[Expression], hard: list[Expression], solver: str, b
     if "fork" not in multiprocessing.get_all_start_methods():
         raise SolverUnavailableError("MUS の時間制限には fork が必要（この環境では使えない）。mus_time_limit を使うには Linux などで実行する")
     ctx = multiprocessing.get_context("fork")
+    log.info("MUS（子プロセス）を開始: soft %d 件・hard %d 件・solver=%s・時間制限 %gs", len(soft), len(hard), solver, budget, stacklevel=5)
     index = {id(e): i for i, e in enumerate(soft)}
 
     def run(conn: Connection) -> None:
@@ -130,6 +136,7 @@ def _mus_in_child(soft: list[Expression], hard: list[Expression], solver: str, b
     send.close()
     try:
         if not recv.poll(budget):                                   # 時間切れ: 子を止める
+            log.info("MUS（子プロセス）が %gs で終わらず、打ち切った", budget, stacklevel=5)
             return None
         kind, payload = recv.recv()
     except EOFError:
@@ -140,6 +147,7 @@ def _mus_in_child(soft: list[Expression], hard: list[Expression], solver: str, b
         proc.join()
     if kind == "error":
         raise InternalError(f"MUS の計算が失敗した: {payload}")
+    log.info("MUS（子プロセス）が時間内に終了: 添字 %d 件", len(payload), stacklevel=5)
     return payload
 
 
@@ -164,6 +172,7 @@ def _bounded_mus(soft: list[Expression], hard: list[Expression], solver: str, bu
     if s.status().exitstatus.name != "UNSATISFIABLE":
         return None                                                 # 事前候補が時間内に取れなかった
     candidate = [by_assump[a] for a in s.get_core()]
+    log.info("MUS の事前候補（コア）: %d 件", len(candidate), stacklevel=4)
     found = _mus_in_child(soft, hard, solver, budget)
     if found is None:
         return candidate, False
@@ -180,6 +189,7 @@ def _check(exprs: list, time_limit: float) -> str:
     Returns:
         `"sat"`（解あり）・`"unsat"`（解なしと証明）・`"unknown"`（時間切れ）のいずれか。"""
     s = cp.SolverLookup.get(SOLVE_SOLVER, cp.Model(exprs))
+    attach_engine_log(SOLVE_SOLVER, s)
     if s.solve(time_limit=time_limit):
         return "sat"
     return "unsat" if s.status().exitstatus.name == "UNSATISFIABLE" else "unknown"
@@ -208,12 +218,48 @@ def diagnose(I: Instance, eps: Eps, time_limit: float | None = None, mus_solver:
 
     Returns:
         診断結果。リターンコードは `Diagnosis.code`（nurse/codes.py）。"""
+    log.info("診断開始: time_limit=%s mus_solver=%s mus_time_limit=%s", time_limit, mus_solver, mus_time_limit)
+    d = _diagnose(I, eps, time_limit, mus_solver, mus_time_limit)
+    _log_result(d)
+    return d
+
+
+def _log_result(d: Diagnosis) -> None:
+    """診断の結果（ステータス・リターンコード・MUS）をログに残す。MUS の個別内容は DEBUG。
+
+    Args:
+        d: `diagnose` の結果。"""
+    log.info("診断結果: ステータス=%s コード=%s(%d) 状態=%s", d.status, d.code.name, int(d.code), d.detail, stacklevel=2)
+    if d.status == CONFLICT:
+        log.info("MUS: %d 件（前提 %d・soft %d）、最小=%s、前提だけの矛盾=%s、群=%s、ソルバー=%s",
+                 len(d.items), len(d.given_items), len(d.soft_items), d.minimal, d.hard_only, d.groups, d.mus_solver, stacklevel=2)
+        for x in d.items:
+            log.debug("MUS の要素: %s", x.line, stacklevel=2)
+    log.info("診断の所要時間: %s", {k: round(v, 2) for k, v in d.times.items()}, stacklevel=2)
+
+
+
+
+def _diagnose(I: Instance, eps: Eps, time_limit: float | None = None, mus_solver: str = MUS_SOLVER,
+             mus_time_limit: float | None = None) -> Diagnosis:
+    """`diagnose` の本体（ログの出入口は `diagnose`）。引数と戻り値は `diagnose` と同じ。
+
+    Args:
+        I: 入力データ。
+        eps: ε 制約（品質要件）の閾値。
+        time_limit: 通常の求解の時間制限（秒）。
+        mus_solver: MUS を求めるソルバー。
+        mus_time_limit: MUS 1回あたりの時間制限（秒）。
+
+    Returns:
+        診断結果。"""
     cfg = load_settings()
     time_limit = cfg.solve_time_limit if time_limit is None else time_limit
     mus_time_limit = cfg.mus_time_limit if mus_time_limit is None else mus_time_limit
     first = solve(I, eps, time_limit=time_limit)
     times = {"solve": first.times["solve"]}
     state = first.status.exitstatus.name
+    log.info("通常の求解: ok=%s ステータス=%s", first.ok, state, stacklevel=2)
     if first.ok:
         return Diagnosis(FEASIBLE, state, times=times)
     if state != "UNSATISFIABLE":
@@ -233,8 +279,12 @@ def diagnose(I: Instance, eps: Eps, time_limit: float | None = None, mus_solver:
     def run(soft_exprs: list[Expression], hard_exprs: list[Expression], pool: list[Named]) -> tuple[list[Named] | None, bool]:
         """時間制限つきの MUS → (pool のうち矛盾に関わるもの, 最小か)。事前候補も取れなければ (None, False)"""
         got = _bounded_mus(soft_exprs, hard_exprs, solver, mus_time_limit)
+        log.info("MUS 終了: %s（対象 %d 件・hard %d 件 → 矛盾 %s 件）", "事前候補も取れず原因を特定できない" if got is None
+                 else ("最小" if got[1] else "時間切れ（事前候補を採用。最小でない可能性）"), len(soft_exprs), len(hard_exprs),
+                 "-" if got is None else len(got[0]), stacklevel=3)
         return (None, False) if got is None else (pick(got[0], pool), got[1])
 
+    log.info("制約を分類: 背景（hard）%d 本・前提（カーネル・層1）%d 本・soft（層2・層3）%d 本", len(background), len(given), len(soft), stacklevel=2)
     t0 = time.perf_counter()
     given_exprs = [x.expr for x in given]
     verdict = _check(background + given_exprs, time_limit)

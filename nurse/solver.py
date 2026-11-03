@@ -1,12 +1,16 @@
 """求解と解の表示（診断は diagnosis.py）。計時は build / transform（CPMpy→ソルバー変換）/ solve に分けて返す。"""
 from __future__ import annotations
+import logging
 import time
 from typing import Any, NamedTuple
 import numpy as np
 import cpmpy as cp
 from .config import load_settings
 from .instance import Instance, Eps
+from .logger import attach_engine_log
 from .model import NurseModel
+
+log = logging.getLogger(__name__)
 
 
 # 決定事項: 求解は CP-SAT（OR-Tools）。MUS の計算は exact（diagnosis.MUS_SOLVER）。変更する場合はユーザーに確認する。
@@ -39,18 +43,25 @@ def solve(I: Instance, eps: Eps, time_limit: float | None = None, workers: int =
         `SolveResult`。従来どおり `ok, status, M, times, counts = solve(...)` と展開もできる。"""
     if time_limit is None:
         time_limit = load_settings().solve_time_limit
+    log.info("求解開始: solver=%s time_limit=%gs workers=%d lin_level=%d（看護師 %d 人・%d 日、有効な制約を絞る=%s）",
+             solver, time_limit, workers, lin_level, I.n_nurses, I.n_days, enabled is not None)
     t0 = time.perf_counter()
     M = NurseModel(I, eps)
     groups = M.build(enabled)
     model = cp.Model([c for cs in groups.values() for c in cs])
     t1 = time.perf_counter()
+    log.info("モデル構築 完了: %.2fs（制約 %d 本）", t1 - t0, len(model.constraints))
     s = cp.SolverLookup.get(solver, model)
     t2 = time.perf_counter()
+    log.info("ソルバーへの変換 完了: %.2fs（%s）", t2 - t1, solver)
+    attach_engine_log(solver, s)                                   # CP-SAT の標準ログを nurse.engine へ流す
+    log.info("求解プロセス開始")
     if solver == "ortools":
         ok = s.solve(time_limit=time_limit, num_workers=workers, linearization_level=lin_level)
     else:
         ok = s.solve(time_limit=time_limit)
     t3 = time.perf_counter()
+    log.info("求解 終了: ok=%s ステータス=%s 求解 %.2fs（構築 %.2fs・変換 %.2fs）", ok, s.status().exitstatus.name, t3 - t2, t1 - t0, t2 - t1)
     return SolveResult(ok, s.status(), M, dict(build=t1 - t0, transform=t2 - t1, solve=t3 - t2),
                        {k: len(v) for k, v in groups.items()})
 
