@@ -1,6 +1,7 @@
 """ログ（nurse/logger.py）: 設定（YAML / JSON）の検証、親 `nurse`（①プログラム全体）と子 `nurse.engine`（②エンジン求解詳細）の
 出力先（標準出力・ファイル）、必須項目（タイムスタンプ・メソッド・メッセージ）、ローテーション、各処理が残すログの内容。"""
 import dataclasses as dc
+import datetime
 import json
 import logging
 import logging.handlers
@@ -225,7 +226,7 @@ def test_engine_log_disabled_by_level_does_not_change_the_solve(tmp_path: pathli
 
 def test_debug_level_lists_individual_constraints_and_variables(tmp_path: pathlib.Path) -> None:
     lg.setup_logging(_config(tmp_path, program="level: DEBUG, console: false"))
-    res = m.solve(m.synthetic(start_date=__import__("datetime").date(2026, 11, 2)), m.Eps(), time_limit=60)
+    res = m.solve(m.synthetic(start_date=datetime.date(2026, 11, 2)), m.Eps(), time_limit=60)
     log = _read(tmp_path, "nurse.log")
     assert len(re.findall(r"nurse\.kernel\.build_named: 制約: ", log)) == sum(res.counts.values())     # 個別の制約が全件
     assert "制約: cover-0001  [人数制約下限] 11/02 00:00 - 11/02 00:30 勤務者数=3" in log
@@ -293,3 +294,16 @@ def test_method_column_is_the_public_function_not_a_helper(tmp_path: pathlib.Pat
             "nurse.config.load_settings", "nurse.logger.setup_logging"} <= methods
     private = {x for x in methods if re.search(r"\._[a-z]", x)}                                       # `__init__` などの特殊メソッドは除く
     assert not private, private
+
+
+def test_diagnosis_does_not_rebuild_the_constraints(tmp_path: pathlib.Path) -> None:
+    """診断は、求解で作った制約（Named）を再利用する。制約の定義・総数・個別内容のログが、求解と診断で重複しない。"""
+    lg.setup_logging(_config(tmp_path, program="level: DEBUG, console: false", engine="level: INFO, console: false, propagate: false"))
+    I = m.synthetic(start_date=datetime.date(2026, 11, 2))
+    d = m.diagnose(dc.replace(I, off_days=[I.n_days + 1] + I.off_days[1:]), m.Eps(), time_limit=60)
+    assert d.status == m.CONFLICT
+    log = _read(tmp_path, "nurse.log")
+    assert log.count("制約の総数:") == 1 and log.count("補助変数の総数:") == 1             # 作り直さないので、1回だけ
+    assert log.count("制約: cover-0001 ") == 1 and log.count("補助変数: wk_0_12") == 1
+    assert "定義済みの制約を再利用（作り直さない）" in log                                # 診断が再利用した記録（DEBUG）
+    assert log.index("通常の求解: ok=False") < log.index("制約を分類")

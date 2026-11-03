@@ -52,6 +52,7 @@ class ModelKernel:
         log.info("決定変数 x を宣言: 看護師 %d 人 × 時点 %d（履歴 %d + 計画 %d）、変数の総数 %d",
                  I.n_nurses, self.H + self.T, self.H, self.T, sum(v.size for v in self.xv))
         self._work: dict[tuple[int, int], object] = {}
+        self._named_cache: dict[tuple[str, ...], dict[str, list[Named]]] = {}   # 有効な制約名 → build_named の結果（作り直さない）
         self.active: frozenset[str] = frozenset(selected_constraints(I))  # build() で有効になった制約名
 
     # ---- 式の部品（変数は作らない） ----
@@ -168,6 +169,10 @@ class ModelKernel:
         制約メソッドが返す Expression / Item / Aux を Named（ID・制約クラス・対象・パラメータ・hard か）に正規化する。
         ID は `{群}-{群内連番4桁}`（連番は、その群の制約メソッドが返した順。補助変数の定義も数える）。
 
+        **同じ有効な制約の集合なら、最初に作った結果を再利用する**（作り直さない）。求解（`build`）と診断（MUS）が、同じ式・
+        同じ補助変数を共有するため、診断は `Named` を取り直さない。モデルの入力（`I`・`eps`）は生成後に変えない前提。
+        返す辞書とリストは呼び出しごとの新しい入れ物で、中の `Named`（と式）は共有する。
+
         Args:
             enabled: 有効にする制約名（`None` なら全て）。カーネル・層1は外せない。
 
@@ -175,10 +180,16 @@ class ModelKernel:
             `{制約名: [Named…]}`。"""
         names = selected_constraints(self.I, enabled)
         self.active = frozenset(names)
-        built = {nm: [self._named(REGISTRY[nm], i, c)
-                      for i, c in enumerate(getattr(self, REGISTRY[nm].method)())] for nm in names}
-        self._log_definitions(built)
-        return built
+        key = tuple(names)
+        built = self._named_cache.get(key)
+        if built is None:
+            built = {nm: [self._named(REGISTRY[nm], i, c)
+                          for i, c in enumerate(getattr(self, REGISTRY[nm].method)())] for nm in names}
+            self._named_cache[key] = built
+            self._log_definitions(built)
+        else:
+            log.debug("定義済みの制約を再利用（作り直さない）: %d 本（%d 群）", sum(map(len, built.values())), len(built))
+        return {nm: list(items) for nm, items in built.items()}
 
     def _log_definitions(self, built: dict[str, list[Named]]) -> None:
         """定義した制約（個別内容と総数）と、制約の中で宣言された補助変数（個別内容と総数）をログに残す。

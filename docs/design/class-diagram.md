@@ -360,7 +360,7 @@ classDiagram
     note for Renderer "対象の部品: Nurse, Day, DaySpan, Span, Cat, Shift, Clock（いずれも値オブジェクト）"
 ```
 
-- **`ModelKernel`** は、決定変数 `x[n,t,s]`（`xv`。看護師 `n` の取れる勤務 `s` のみ作る疎な形）と、式の部品（`x`・`work`・`night_count` など）、常に有効な構造制約（`c_struct`・`c_history`・`c_fixed`）を持つ。`build_named` が、有効な制約ごとに `Named` の一覧を作り、`build` は式だけを返す（求解用）。
+- **`ModelKernel`** は、決定変数 `x[n,t,s]`（`xv`。看護師 `n` の取れる勤務 `s` のみ作る疎な形）と、式の部品（`x`・`work`・`night_count` など）、常に有効な構造制約（`c_struct`・`c_history`・`c_fixed`）を持つ。`build_named` が、有効な制約ごとに `Named` の一覧を作り（同じ有効な制約の集合なら最初の結果を再利用する）、`build` は式だけを返す（求解用）。
 - **3つのミックスイン** `LawConstraints`（層1）・`DomainConstraints`（層2）・`OptionalConstraints`（層3）が、層ごとの制約メソッド（`c_` で始まる）を持つ。`NurseModel` は、3つを合成した（多重継承）クラスで、自分では何も定義しない。
 - **登録の仕組み**: 制約メソッドは `@constraint` で `registry.REGISTRY`（制約名 → `ConstraintSpec`）に登録される。`selected_constraints` が、`Rules.off` と `enabled` を反映して有効な制約名を選ぶ。
 - **制約の名前**: 制約メソッドは、式を `Item`（対象・パラメータつきの個別の規則）か `Aux`（補助変数の定義）で包んで返す。`build_named` が、全制約に ID を付けて `Named` にする。`Named.message` は、`Renderer`（日付・看護師名・区分名の表示方針を `Instance` から取る）が、診断のときだけ作る。
