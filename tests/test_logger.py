@@ -46,15 +46,16 @@ def _read(tmp_path: pathlib.Path, name: str) -> str:
 
 def test_yaml_and_json_configs_are_equivalent(tmp_path: pathlib.Path) -> None:
     data = {"log_dir": "x", "rotation": {"max_bytes": 100, "backup_count": 2},
-            "program": {"level": "debug", "file": "a.log", "console": False}, "engine": {"propagate": True}}
+            "program": {"level": "debug", "file": "a.log", "console": False}, "engine": {"propagate": False}}
     y, j = tmp_path / "c.yaml", tmp_path / "c.json"
     y.write_text("log_dir: x\nrotation: {max_bytes: 100, backup_count: 2}\nprogram: {level: debug, file: a.log, console: false}\n"
-                 "engine: {propagate: true}\n", encoding="utf-8")
+                 "engine: {propagate: false}\n", encoding="utf-8")
     j.write_text(json.dumps(data), encoding="utf-8")
     cfg = lg.read_logging_config(y)
     assert cfg == lg.read_logging_config(j) == lg.parse_logging_config(data)
-    assert cfg.program.level == "DEBUG" and not cfg.program.console and cfg.engine.propagate and cfg.engine.file == "nurse_engine.log"
+    assert cfg.program.level == "DEBUG" and not cfg.program.console and not cfg.engine.propagate and cfg.engine.file == "nurse_engine.log"
     assert lg.parse_logging_config({}) == lg.LoggingConfig() == lg.parse_logging_config(None)         # 省略は既定値
+    assert lg.LoggingConfig().engine.propagate and not lg.LoggingConfig().program.propagate         # ②は既定で①にも流す
 
 
 @pytest.mark.parametrize("data,needle", [
@@ -62,6 +63,8 @@ def test_yaml_and_json_configs_are_equivalent(tmp_path: pathlib.Path) -> None:
     ({"program": {"level": "LOUD"}}, "program.level"),
     ({"program": {"file": "sub/a.log"}}, "program.file"),
     ({"engine": {"console": "yes"}}, "engine.console"),
+    ({"engine": {"propagate": "yes"}}, "engine.propagate"),
+    ({"program": {"propagate": True}}, "未知のキー"),                              # 親には流す先が無い
     ({"rotation": {"max_bytes": 0}}, "rotation.max_bytes"),
     ({"rotation": {"backup_count": -1}}, "rotation.backup_count"),
     ({"rotation": {"max_bytes": True}}, "rotation.max_bytes"),
@@ -116,7 +119,7 @@ def test_library_is_silent_until_setup(capsys: pytest.CaptureFixture[str], tmp_p
 
 
 def test_setup_creates_parent_and_child_with_stdout_and_rotating_file(tmp_path: pathlib.Path) -> None:
-    lg.setup_logging(_config(tmp_path, extra="rotation: {max_bytes: 4096, backup_count: 3}"))
+    lg.setup_logging(_config(tmp_path, engine="level: INFO, propagate: false", extra="rotation: {max_bytes: 4096, backup_count: 3}"))
     parent, child = logging.getLogger("nurse"), logging.getLogger("nurse.engine")
     assert child.parent is parent                                                  # 親子関係
     for logger, name in ((parent, "nurse.log"), (child, "nurse_engine.log")):
@@ -125,8 +128,10 @@ def test_setup_creates_parent_and_child_with_stdout_and_rotating_file(tmp_path: 
         rot = next(h for h in logger.handlers if isinstance(h, logging.handlers.RotatingFileHandler))
         assert (rot.maxBytes, rot.backupCount, pathlib.Path(rot.baseFilename).name) == (4096, 3, name)
     assert parent.propagate is False and child.propagate is False
-    lg.setup_logging(_config(tmp_path))                                            # 呼び直しても、ハンドラは増えない
-    assert sum(getattr(h, "_nurse_handler", False) for h in parent.handlers + child.handlers) == 4
+    lg.setup_logging(_config(tmp_path))                                            # 呼び直しても、ハンドラは増えない。既定は子も親へ流す
+    assert child.propagate is True
+    assert sorted(type(h).__name__ for h in parent.handlers if getattr(h, "_nurse_handler", False)) == ["RotatingFileHandler", "StreamHandler"]
+    assert sorted(type(h).__name__ for h in child.handlers if getattr(h, "_nurse_handler", False)) == ["RotatingFileHandler"]   # 標準出力は親が出す
     default = lg.LoggingConfig()
     assert (default.max_bytes, default.backup_count) == (10 * 1024 * 1024, 5)     # ローテーションの既定
 
@@ -164,27 +169,51 @@ def test_program_log_records_variables_constraints_solving_and_status(tmp_path: 
     assert re.search(r"補助変数の総数: \d+（種類別 .+）", log)
     for step in ("求解開始: solver=ortools", "モデル構築 完了", "ソルバーへの変換 完了", "求解プロセス開始", "求解 終了: ok=True ステータス=FEASIBLE"):
         assert step in log, step                                                   # 制御・求解プロセス・ステータス
-    assert "Starting CP-SAT" not in log and "#Variables" not in log               # ソルバーの詳細は親に混ぜない
+    assert "Starting CP-SAT solver" in log and "nurse.engine.CP-SAT:" in log     # 既定では、ソルバーの詳細も①に時系列で入る
+    assert log.index("求解プロセス開始") < log.index("Starting CP-SAT solver") < log.index("求解 終了")   # 求解の流れの中に並ぶ
 
 
-def test_engine_log_goes_to_its_own_file_and_stdout(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
-    lg.setup_logging(_config(tmp_path))
+def test_engine_log_goes_to_its_own_file_and_flows_into_the_program_log(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
+    lg.setup_logging(_config(tmp_path))                                            # 既定: ②は①にも流す
     m.solve(m.synthetic(), m.Eps(), time_limit=60)
     engine, program, out = _read(tmp_path, "nurse_engine.log"), _read(tmp_path, "nurse.log"), capsys.readouterr().out
     assert "Starting CP-SAT solver" in engine and "CpSolverResponse summary" in engine and "status: " in engine
-    assert "Starting CP-SAT solver" in out and "求解開始" in out                    # 標準出力には、①と②の両方
-    assert out.count("Starting CP-SAT solver") == 1                                # ソルバー自身の直接出力と二重にならない
-    assert "求解開始" not in engine
+    assert "求解開始" not in engine                                                # ②には処理の流れは入らない
+    engine_lines = engine.splitlines()
+    assert all(x in program for x in engine_lines[:5] + engine_lines[-5:])        # ①にも同じ行が入る
+    assert program.count("Starting CP-SAT solver") == 1                            # ①のファイルで二重にならない
+    assert "求解開始" in out and out.count("Starting CP-SAT solver") == 1          # 標準出力にも出る。二重にならない
+    assert out.count("CpSolverResponse summary") == 1
 
 
-def test_engine_console_off_and_propagate(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
-    lg.setup_logging(_config(tmp_path, engine="level: INFO, console: false"))
+def test_engine_propagate_false_keeps_the_program_log_short(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
+    lg.setup_logging(_config(tmp_path, engine="level: INFO, propagate: false"))
+    m.solve(m.synthetic(), m.Eps(), time_limit=60)
+    program, out = _read(tmp_path, "nurse.log"), capsys.readouterr().out
+    assert "Starting CP-SAT solver" not in program and "nurse.engine.CP-SAT:" not in program      # ①は処理の流れだけ
+    assert "Starting CP-SAT solver" in _read(tmp_path, "nurse_engine.log")                  # ②は専用のファイル
+    assert out.count("Starting CP-SAT solver") == 1 and "求解開始" in out                    # 標準出力には、①と②の両方（子が自分で出す）
+
+
+def test_engine_console_off(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
+    lg.setup_logging(_config(tmp_path, engine="level: INFO, console: false, propagate: false"))
     m.solve(m.synthetic(), m.Eps(), time_limit=60)
     assert "Starting CP-SAT solver" not in capsys.readouterr().out and "Starting CP-SAT solver" in _read(tmp_path, "nurse_engine.log")
-    capsys.readouterr()
-    lg.setup_logging(_config(tmp_path, engine="level: INFO, console: false, propagate: true"))      # 親にも流す
+
+
+def test_engine_console_is_used_when_the_program_console_is_off(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """親が標準出力に出さないときは、②が流す設定でも、子が自分の標準出力に出す（一度だけ）。"""
+    lg.setup_logging(_config(tmp_path, program="level: INFO, console: false"))
     m.solve(m.synthetic(), m.Eps(), time_limit=60)
-    assert "Starting CP-SAT solver" in _read(tmp_path, "nurse.log") and "Starting CP-SAT solver" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert out.count("Starting CP-SAT solver") == 1 and "求解開始" not in out
+
+
+def test_program_level_filters_the_engine_lines_that_flow_into_it(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
+    lg.setup_logging(_config(tmp_path, program="level: WARNING"))                  # ①は WARNING 以上だけ。②は INFO
+    m.solve(m.synthetic(), m.Eps(), time_limit=60)
+    assert _read(tmp_path, "nurse.log") == "" and capsys.readouterr().out == ""   # 親へ流れた②の INFO 行も、①のレベルで絞られる
+    assert "Starting CP-SAT solver" in _read(tmp_path, "nurse_engine.log")         # ②の専用ファイルには残る
 
 
 def test_engine_log_disabled_by_level_does_not_change_the_solve(tmp_path: pathlib.Path) -> None:

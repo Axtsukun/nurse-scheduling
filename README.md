@@ -33,7 +33,7 @@ pip install -r requirements.txt                        # cpmpy, ortools, exact, 
 
 python nurse_csp.py            # 合成インスタンス（30人・30日）を1問求解し、勤務表の先頭を表示
 python evaluate.py             # 求解 → 独立検証 → 評価（人数・勤務回数・72時間・土日・要望）を表示
-pytest -q                      # 全テスト（152件、約1分40秒）
+pytest -q                      # 全テスト（157件、約1分40秒）
 ```
 
 どちらのスクリプトも `--lin`（`linearization_level`）と `--time-limit` を取る。`evaluate.py --requests 0.10` で個別要望を全セルの1割だけ加える。
@@ -80,7 +80,7 @@ nurse-scheduling/
 │
 ├── tests/
 │   ├── conftest.py         共通の設定（ログの出力先をテストごとの一時ディレクトリにする）
-│   ├── test_logger.py      ログ（設定の検証・親子2系統の出力先・必須項目・ローテーション・各処理のログ）  29件
+│   ├── test_logger.py      ログ（設定の検証・親子2系統の出力先・必須項目・ローテーション・各処理のログ）  34件
 │   ├── test_preprocess.py  前処理の厳密性（総当たりと照合。ソルバー不要）        6件
 │   ├── test_layers.py      層構成・根拠ID・休日の窓・検査関数の対応・パラメータ検証・取れない勤務への要望の検出  40件
 │   ├── test_named.py       制約の名前（ID・クラス名・メッセージ・遅延生成・全群の一覧）・要望の一本化  17件
@@ -534,10 +534,14 @@ mkdocs build --strict         # _site/ に出力。警告があれば失敗す�
 log_dir: logs                    # 出力先ディレクトリ（実行時のカレントディレクトリからの相対）
 rotation: {max_bytes: 10485760, backup_count: 5}
 program: {level: INFO, file: nurse.log, console: true}                           # ①
-engine:  {level: INFO, file: nurse_engine.log, console: true, propagate: false}  # ②
+engine:  {level: INFO, file: nurse_engine.log, console: true, propagate: true}   # ②
 ```
 
-- **親子の関係**: `nurse.engine` は `nurse` の子。既定では、②を①へ流さない（`propagate: false`。①に CP-SAT の数百行が混ざらないように）。`true` にすると①の出力にも流れる。②を出さないなら `engine.level: WARNING`（ソルバーの詳細ログを有効にしないので、求解も変わらない）。
+- **親子の関係**: `nurse.engine` は `nurse` の子。**既定では、②を①にも流す**（`propagate: true`）。①の1本で、処理の流れとソルバーの動きを時系列に追える（30人・30日の例: `nurse.log` 354行、`nurse_engine.log` 321行）。
+  - 親へ流れた行は、**①のレベルで絞られる**（①を `WARNING` にすれば、②の INFO 行は①に出ない。②の専用ファイルには残る）。
+  - 標準出力は、親のハンドラが出すので、②は二重に出さない（①が標準出力に出さないときだけ、②が自分で出す）。
+  - `propagate: false` にすると、①は処理の流れだけの短いログ（同じ例で33行）になり、②は専用の出力だけになる。
+  - ②を出さないなら `engine.level: WARNING`（ソルバーの詳細ログを有効にしないので、求解も変わらない）。
 - **個別の変数・制約まで見るとき**: `program.level: DEBUG`。制約が数千本あるモデルでは、行数が大きくなる。
 - **ライブラリとして使うとき**: `setup_logging()` を呼ぶまで、何も出さない（`nurse` に `NullHandler` を付けてある）。CLI（`nurse_csp.py`）は起動時に呼ぶ。
 
@@ -567,7 +571,7 @@ setup_logging("my.logging.yaml")     # 省略すると、上の順に探す
 | ファイル | 件数 | 求解 | 見ているもの |
 |---|---|---|---|
 | `test_preprocess.py` | 6 | しない | 夜勤時間の係数、勤務間隔の閾値分解、人数制約の区間化が総当たりと完全一致。人数制約の区間が基本区間で重ならないこと、需要の入力検査 |
-| `test_logger.py` | 29 | する | ログ設定（YAML / JSON）の検証、親 `nurse`・子 `nurse.engine` の出力先（標準出力・ファイル）、行ごとの必須項目（タイムスタンプ・メソッド・メッセージ）、ローテーション、変数・制約・求解・診断（MUS）・設定ファイル入力のログの内容、ソルバーのログを標準出力の差し替えに左右されず取り込むこと |
+| `test_logger.py` | 34 | する | ログ設定（YAML / JSON）の検証、親 `nurse`・子 `nurse.engine` の出力先（標準出力・ファイル。既定では子を親にも流し、標準出力は二重にならない。親のレベルで絞られる）、行ごとの必須項目（タイムスタンプ・メソッド・メッセージ）、ローテーション、変数・制約・求解・診断（MUS）・設定ファイル入力のログの内容、ソルバーのログを標準出力の差し替えに左右されず取り込むこと |
 | `test_layers.py` | 40 | 一部 | 登録した制約と `constraints.yaml` の整合、オフにできない制約の保護、算入閾値、休日の窓（曜日7通り×起算2通り×日数2通り）、パラメータ検証、検査関数の対応、`night_band` オフ時の界、`SolveResult`、週末の定義、取れない勤務への要望が `InputError` になること |
 | `test_solve.py` | 7 | する | 可解性と独立検証（`lin` 0/1）、層2・層3を1つずつ外した求解、休日の各規則、検証器が違反を検出すること |
 | `test_named.py` | 17 | しない | `build` と `build_named` が同じ式、全群の短い一意なクラス名、**ID が全制約で一意・群内で連続**、補助変数・背景はメッセージなし、全 soft 制約のメッセージ、**メッセージの遅延生成**、全群のメッセージの一覧（開始日あり・なし）、人数制約が基本区間・翌日 00:00 で表れること、仕様書 8 節の表が実装の出力と一致すること |

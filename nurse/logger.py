@@ -3,8 +3,10 @@
 - **親 `nurse`（①プログラム全体のログ）**: ファイル入出力、制御プロセス、変数宣言（個別内容と総数）、制約定義（個別内容と総数）、
   求解プロセス、ステータス、結果（ステータス・MUS）。モジュールごとの `logging.getLogger(__name__)` はすべてこの子孫で、
   親のハンドラに流れる。
-- **子 `nurse.engine`（②エンジン求解詳細ログ）**: ソルバー（CP-SAT）の標準ログ。専用のファイルと標準出力に出す。
-  既定では親へ伝えない（`propagate: false`。親の出力に CP-SAT の数百行が混ざらないようにする）。
+- **子 `nurse.engine`（②エンジン求解詳細ログ）**: ソルバー（CP-SAT）の標準ログ。専用のファイルに出し、**既定では親にも流す**
+  （`propagate: true`。①の1本で、処理の流れとソルバーの動きを時系列に追える）。親へ流れた行は、①のレベルで絞られる。
+  親にも流すとき、標準出力は親のハンドラが出すので、子の標準出力は省く（二重に出さない）。
+  親へ流さない（`propagate: false`）なら、①は処理の流れだけの短いログになり、②は専用の出力だけになる。
 
 設定は YAML か JSON（拡張子で判別）。メッセージの書式には、**タイムスタンプ（`asctime`）・メソッド（`funcName`）・メッセージ
 （`message`）を必ず含める**（含まない設定は `InputError`）。ファイルは `RotatingFileHandler`（既定は 10MB × 5世代）。
@@ -18,7 +20,7 @@ format: "%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s.%(funcName)s: %(messag
 datefmt: "%Y-%m-%d %H:%M:%S"
 rotation: {max_bytes: 10485760, backup_count: 5}
 program: {level: INFO, file: nurse.log, console: true}
-engine: {level: INFO, file: nurse_engine.log, console: true, propagate: false}
+engine: {level: INFO, file: nurse_engine.log, console: true, propagate: true}
 ```
 """
 from __future__ import annotations
@@ -62,7 +64,7 @@ class SinkConfig:
     level: str = "INFO"             # 出力するレベル（DEBUG / INFO / WARNING / ERROR / CRITICAL）
     file: str = "nurse.log"         # ログファイル名（`log_dir` の下）
     console: bool = True            # 標準出力にも出すか
-    propagate: bool = False         # 親のハンドラへも流すか（子 `engine` のみ意味がある）
+    propagate: bool = False         # 親のハンドラへも流すか（子 `engine` のみ。`engine` の既定は true）
 
 
 @dataclass(frozen=True)
@@ -74,7 +76,7 @@ class LoggingConfig:
     max_bytes: int = 10 * 1024 * 1024                       # ファイルローテーション: 1ファイルの最大バイト数
     backup_count: int = 5                                   # ファイルローテーション: 残す世代数
     program: SinkConfig = field(default_factory=SinkConfig)                                         # ①親
-    engine: SinkConfig = field(default_factory=lambda: SinkConfig(file="nurse_engine.log"))         # ②子
+    engine: SinkConfig = field(default_factory=lambda: SinkConfig(file="nurse_engine.log", propagate=True))   # ②子
 
 
 def _check_keys(data: dict[str, Any], allowed: tuple[str, ...], where: str) -> None:
@@ -105,7 +107,7 @@ def _section(data: dict[str, Any], key: str, source: str) -> dict[str, Any]:
     return value
 
 
-def _sink(data: dict[str, Any], key: str, default: SinkConfig, source: str) -> SinkConfig:
+def _sink(data: dict[str, Any], key: str, default: SinkConfig, source: str, allow_propagate: bool) -> SinkConfig:
     """`program` / `engine` の節を `SinkConfig` にする。
 
     Args:
@@ -113,12 +115,13 @@ def _sink(data: dict[str, Any], key: str, default: SinkConfig, source: str) -> S
         key: 節の名前（`program` または `engine`）。
         default: 省略されたキーの既定値。
         source: エラー文に出す入力元。
+        allow_propagate: `propagate` キーを許すか（子 `engine` だけ。親は流す先が無い）。
 
     Returns:
         検証済みの出力設定。"""
     sec = _section(data, key, source)
     where = f"{source}:{key}"
-    _check_keys(sec, ("level", "file", "console", "propagate"), where)
+    _check_keys(sec, ("level", "file", "console") + (("propagate",) if allow_propagate else ()), where)
     level = str(sec.get("level", default.level)).upper()
     if level not in LEVELS:
         raise InputError(f"{where}.level は {', '.join(LEVELS)} のいずれか: {sec['level']!r}")
@@ -171,7 +174,7 @@ def parse_logging_config(data: object, source: str = "<dict>") -> LoggingConfig:
             raise InputError(f"{source}:rotation.{name} は{'正' if name == 'max_bytes' else '0 以上'}の整数でなければならない: {value!r}")
         numbers[name] = value
     return LoggingConfig(log_dir, fmt, datefmt, numbers["max_bytes"], numbers["backup_count"],
-                         _sink(data, "program", default.program, source), _sink(data, "engine", default.engine, source))
+                         _sink(data, "program", default.program, source, False), _sink(data, "engine", default.engine, source, True))
 
 
 def read_logging_config(path: str | os.PathLike[str]) -> LoggingConfig:
@@ -222,18 +225,20 @@ def reset_logging() -> None:
         logger.setLevel(logging.NOTSET)
 
 
-def _handlers(cfg: LoggingConfig, sink: SinkConfig) -> list[logging.Handler]:
+def _handlers(cfg: LoggingConfig, sink: SinkConfig, console: bool) -> list[logging.Handler]:
     """1系統分のハンドラ（標準出力・ローテーションするファイル）を作る。
 
     Args:
         cfg: ログ設定の全体。
         sink: この系統の出力設定。
+        console: 標準出力のハンドラを付けるか（親へ流す子は、親が出すので付けない）。
 
     Returns:
-        標準出力（`console` が true のとき）と、ローテーションするファイルのハンドラ。"""
+        標準出力（`console` が true のとき）と、ローテーションするファイルのハンドラ。各ハンドラのレベルは、この系統のレベル
+        （親へ流れてきた子の行も、親のレベルで絞る）。"""
     formatter = logging.Formatter(cfg.format, cfg.datefmt)
     out: list[logging.Handler] = []
-    if sink.console:
+    if console:
         out.append(logging.StreamHandler(sys.stdout))
     directory = Path(cfg.log_dir)
     try:
@@ -244,7 +249,7 @@ def _handlers(cfg: LoggingConfig, sink: SinkConfig) -> list[logging.Handler]:
         raise InputError(f"ログファイルを作れない: {directory / sink.file}: {e}") from None
     for h in out:
         h.setFormatter(formatter)
-        h.setLevel(logging.NOTSET)
+        h.setLevel(getattr(logging, sink.level))
         setattr(h, _MARK, True)
     return out
 
@@ -268,7 +273,9 @@ def setup_logging(path: str | os.PathLike[str] | None = None, config: LoggingCon
         logger = logging.getLogger(name)
         logger.setLevel(getattr(logging, sink.level))
         logger.propagate = sink.propagate if name == ENGINE_LOGGER else False
-        for h in _handlers(config, sink):
+        # 子を親にも流すとき、標準出力は親のハンドラが出す。子も出すと二重になるので、親が標準出力に出すなら子は省く
+        console = sink.console and not (name == ENGINE_LOGGER and sink.propagate and config.program.console)
+        for h in _handlers(config, sink, console):
             logger.addHandler(h)
     logging.getLogger(__name__).info("ログ設定: %s / 出力先 %s（プログラム %s・エンジン %s、ローテーション %d バイト × %d 世代）",
                                      source if source is not None else "既定値", Path(config.log_dir).resolve(),
