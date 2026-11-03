@@ -130,4 +130,13 @@ python nurse_csp.py                    # 合成インスタンスで計測
 - **マージ方法**: develop へは **Squash merge**（1ブランチ = 1コミット）。コミットメッセージは squash 後の1件を整える。
 - **PR の向き先**: `develop`。GitHub のデフォルトブランチは `main` のままなので、PR 作成時に base を `develop` にする（既定にしたい場合は GitHub の Settings → Branches で変更）。
 - **Claude の作業**: 作業ブランチを切って進め、`main` と `develop` には直接 push しない。PR は依頼があったときだけ作る。
-- **未決定**: リリース（develop → main）のマージ方法・タグ付けの運用。
+- **リリース（develop → main）**: 実績（v0.1.0）に基づく運用。
+  1. `develop` の `build` が成功していることを確認する。
+  2. PR を `base: main` / `head: develop` で作り、`build` の成功を待つ。
+  3. **通常のマージ（マージコミットを作る）**でマージする。squash にすると `main` と `develop` の履歴がずれ、次回のリリース PR に取り込み済みの差分が混ざるため、リリースだけは squash にしない。
+  4. マージ後の `main` の先頭に**注釈付きタグ** `vMAJOR.MINOR.PATCH`（セマンティックバージョニング。初回は `v0.1.0`）を付ける。
+     ```bash
+     git fetch origin main && git tag -a v0.1.0 -m "v0.1.0" origin/main && git push origin v0.1.0
+     ```
+  - **Claude の制約**: Claude のセッションからはタグの push とリリースの作成が拒否される（git push は接続が切れ、API は 403）。タグ付けはユーザーが手元の端末または GitHub の Releases で行う。
+  - **未決定**: 版番号の上げ方の基準（どの変更で MINOR / PATCH を上げるか）。
