@@ -40,6 +40,7 @@ nav:
   - API リファレンス:
       - 概要: api/index.md
       - nurse_csp: api/nurse_csp.md
+      - nurse_csv: api/nurse_csv.md
       - verify: api/verify.md
       - evaluate: api/evaluate.md
       - nurse: api/nurse.md
