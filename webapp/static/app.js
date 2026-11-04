@@ -40,8 +40,8 @@ const SCHEMA = {
     cols: {"氏名": {}, "取れる勤務": {type: "multi", opts: shiftNames}, "公休数": {type: "number"}, "夜勤リーダー資格": {type: "bool"}, "夜勤専従": {type: "bool"}, "短時間正職員": {type: "bool"}, "算入閾値(時間)": {type: "number", step: 0.5}}},
   "history.csv": {title: "前月末の履歴", help: "計画の直前の勤務（連続勤務・勤務間隔の判定に使う）。列は前月末の日ごとの勤務。",
     cols: {"氏名": {type: "select", opts: nurseNames}, "*": {type: "select", opts: shiftNames}}},
-  "demand.csv": {title: "需要（曜日ごと）", help: "各曜日を 00:00〜24:00 まで空きなく覆うように、時間帯ごとの必要人数を書く。需要なしの時間帯は必要人数 0。",
-    cols: {"曜日": {type: "select", opts: () => WEEKDAYS}, "開始": {type: "time"}, "終了": {type: "time"}, "必要人数": {type: "number"}}},
+  "demand.csv": {title: "需要（日ごと）", help: "対象月の全日について、各日を 00:00〜24:00 まで空きなく覆うように、時間帯ごとの必要人数を書く。需要なしの時間帯は必要人数 0。上のバーで、ある日の需要を他の日へコピーできる。",
+    cols: {"日付": {type: "date"}, "開始": {type: "time"}, "終了": {type: "time"}, "必要人数": {type: "number"}}},
   "fixed.csv": {title: "固定割当（確定休・有休）", help: "この日はこの勤務に固定する。有休の取得日は、ここに入力した日だけを受け取ります（日数の管理はこのシステムの対象外）。",
     cols: {"氏名": {type: "select", opts: nurseNames}, "日付": {type: "date"}, "勤務": {type: "select", opts: shiftNames}}},
   "requests.csv": {title: "勤務者からの要望", help: "休み＝希望休（その日は休み）。シフト＝その日にその勤務。違反は params の req_viol_ratio の割合まで許容します（全部は守れないことがあります）。",
@@ -98,11 +98,16 @@ function renderTable(name, host) {
   const sch = SCHEMA[name], rows = tables[name].rows;
   const head = rows[0];
   const spec = hd => sch.cols[hd] || sch.cols["*"] || {};
-  const tbl = h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), head.map(x => h("th", {}, x)), h("th", {}))),
-    h("tbody", {}, rows.slice(1).map((r, i) => h("tr", {}, h("td", {class: "muted"}, i + 1),
+  const di = head.indexOf("日付");                              // 日付の列があれば、曜日を添える（読み取り専用）
+  const tbl = h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), head.map(x => h("th", {}, x)), di >= 0 ? h("th", {}, "曜") : null, h("th", {}))),
+    h("tbody", {}, rows.slice(1).map((r, i) => h("tr", {class: name === "demand.csv" && r[0] !== rows[i][0] ? "newday" : ""}, h("td", {class: "muted"}, i + 1),
       head.map((hd, ci) => h("td", {}, cellInput(name, i + 1, ci, spec(hd), r[ci] ?? ""))),
+      di >= 0 ? h("td", {class: "muted wd"}, weekdayName(r[di])) : null,
       h("td", {}, h("button", {class: "rowbtn", title: "この行を削除", onclick: () => deleteRow(name, i + 1)}, "✕"))))));
-  host.replaceChildren(h("p", {}, h("button", {onclick: () => addRow(name)}, "＋ 行を追加"), ` ${rows.length - 1} 行`), h("div", {class: "scroll"}, tbl));
+  if (di >= 0) tbl.addEventListener("change", () => tbl.querySelectorAll("tbody tr").forEach((tr, i) => { $(".wd", tr).textContent = weekdayName(tables[name].rows[i + 1][di]); }));
+  const tools = [h("button", {onclick: () => addRow(name)}, "＋ 行を追加"), ` ${rows.length - 1} 行　`];
+  if (name === "demand.csv") tools.push(demandTool());
+  host.replaceChildren(h("p", {}, ...tools), h("div", {class: "scroll"}, tbl));
 }
 function addRow(name) {
   const rows = tables[name].rows, head = rows[0];
@@ -133,6 +138,56 @@ function renderData() {
   renderTable(currentData, $("#datatable"));
 }
 
+// ---------------------------------------------------------------- 月の扱い
+const wdOf = d => /^\d{4}-\d{2}-\d{2}$/.test(d) ? new Date(d + "T00:00:00Z").getUTCDay() : -1;      // 0=日
+const weekdayName = d => wdOf(d) < 0 ? "" : "日月火水木金土"[wdOf(d)];
+const daysIn = ym => { const [y, m] = ym.split("-").map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
+const isMonth = v => /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
+const param = key => (body("params.csv").find(r => r[0] === key) || [])[1] || "";
+const periodText = ym => isMonth(ym) ? `${ym}-01 〜 ${ym}-${String(daysIn(ym)).padStart(2, "0")}（${daysIn(ym)}日間）` : "YYYY-MM で入力してください";
+
+// 需要: ある日の需要を、同じ曜日・平日・土日・全日へコピーする
+function demandTool() {
+  const dates = [...new Set(body("demand.csv").map(r => r[0]))];
+  const day = h("select", {id: "dm-day"}, dates.map(d => h("option", {value: d}, `${d.slice(5)}（${weekdayName(d)}）`)));
+  const scope = h("select", {id: "dm-scope"}, [["wd", "同じ曜日の全日へ"], ["weekday", "平日（月〜金）へ"], ["weekend", "土日へ"], ["all", "全日へ"]].map(([v, t]) => h("option", {value: v}, t)));
+  return h("span", {class: "tool"}, "この日の需要を ", day, scope, h("button", {onclick: () => {
+    const src = body("demand.csv").filter(r => r[0] === day.value), sw = wdOf(day.value);
+    const hit = d => ({wd: wdOf(d) === sw, weekday: [1, 2, 3, 4, 5].includes(wdOf(d)), weekend: [0, 6].includes(wdOf(d)), all: true}[scope.value]);
+    const rows = [tables["demand.csv"].rows[0]];
+    for (const d of dates) (hit(d) ? src.map(r => [d, r[1], r[2], r[3]]) : body("demand.csv").filter(r => r[0] === d)).forEach(r => rows.push(r));
+    tables["demand.csv"].rows = rows; markDirty("demand.csv"); renderData(); toast("需要をコピーしました");
+  }}, "コピー"));
+}
+
+// 対象月を変えたとき、日付を持つ表を新しい月へ移す（需要は曜日ごとの標準から、固定割当・要望は同じ「日」へ）
+function changeMonth(oldYm, newYm) {
+  if (!isMonth(newYm) || !isMonth(oldYm) || oldYm === newYm) return "";
+  const tpl = {};
+  for (const r of body("demand.csv")) { const w = wdOf(r[0]); if (w < 0) continue; const first = body("demand.csv").find(x => wdOf(x[0]) === w)[0]; if (r[0] === first) (tpl[w] ||= []).push(r); }
+  const any = Object.values(tpl)[0] || [];
+  const dem = [tables["demand.csv"].rows[0]];
+  for (let d = 1; d <= daysIn(newYm); d++) { const date = `${newYm}-${String(d).padStart(2, "0")}`; for (const r of tpl[wdOf(date)] || any) dem.push([date, r[1], r[2], r[3]]); }
+  tables["demand.csv"].rows = dem; markDirty("demand.csv");
+  let dropped = 0;
+  for (const t of ["fixed.csv", "requests.csv"]) {
+    const rows = tables[t].rows, out = [rows[0]], di = rows[0].indexOf("日付");
+    for (const r of rows.slice(1)) { const dd = Number(r[di].slice(8, 10)); if (dd >= 1 && dd <= daysIn(newYm)) { r[di] = `${newYm}-${String(dd).padStart(2, "0")}`; out.push(r); } else dropped++; }
+    tables[t].rows = out; markDirty(t);
+  }
+  return `対象月を ${newYm} に変更しました。需要は旧月の最初の各曜日を標準に作り直し、固定割当・要望は同じ日へ移しました${dropped ? `（月末を超える ${dropped} 件は除外）` : ""}。`;
+}
+
+// ---------------------------------------------------------------- 確認ダイアログ（ブラウザ標準の confirm は使わず、画面内で OK / キャンセルを取る）
+function ask(title, nodes, okLabel = "OK") {
+  return new Promise(resolve => {
+    const dlg = h("dialog", {id: "ask"}, h("h3", {}, title), h("div", {class: "askbody"}, nodes),
+      h("div", {class: "askbtns"}, h("button", {id: "ask-cancel", onclick: () => dlg.close("cancel")}, "キャンセル"), h("button", {id: "ask-ok", class: "primary", onclick: () => dlg.close("ok")}, okLabel)));
+    dlg.addEventListener("close", () => { const ok = dlg.returnValue === "ok"; dlg.remove(); resolve(ok); });
+    document.body.append(dlg); dlg.showModal(); $("#ask-ok").focus();
+  });
+}
+
 // ---------------------------------------------------------------- パラメータ・制約
 function renderParams() {
   const rows = body("params.csv"), groups = {};
@@ -142,10 +197,17 @@ function renderParams() {
   $("#params").replaceChildren(...Object.entries(groups).map(([g, idxs]) => h("div", {class: "pg"}, h("h3", {}, g),
     h("table", {}, h("tbody", {}, idxs.map(ri => { const r = tables["params.csv"].rows[ri], key = r[0];
       const set = v => { r[1] = v; markDirty("params.csv"); };
-      const input = sel[key] ? h("select", {onchange: e => set(e.target.value)}, sel[key].map(o => h("option", {selected: o === r[1]}, o)))
+      const period = h("div", {class: "muted"}, key === "target_month" ? periodText(r[1]) : "");
+      const input = key === "target_month" ? h("input", {type: "month", id: "target-month", value: r[1], onchange: e => {
+          const nu = e.target.value, old = r[1];
+          if (!isMonth(nu)) { e.target.value = old; return; }
+          r[1] = nu; markDirty("params.csv"); period.textContent = periodText(nu);
+          const msg = changeMonth(old, nu); renderData(); if (msg) toast(msg, 7000);
+        }})
+        : sel[key] ? h("select", {onchange: e => set(e.target.value)}, sel[key].map(o => h("option", {selected: o === r[1]}, o)))
         : flags.has(key) ? h("input", {type: "checkbox", checked: r[1] === "1", onchange: e => set(e.target.checked ? "1" : "0")})
         : h("input", {type: "text", value: r[1], size: 12, onchange: e => set(e.target.value)});
-      return h("tr", {}, h("td", {}, h("code", {}, key)), h("td", {}, input), h("td", {class: "muted"}, r[3]));
+      return h("tr", {}, h("td", {}, h("code", {}, key)), h("td", {}, input), h("td", {class: "muted"}, r[3], period.textContent ? h("div", {}, period) : null));
     }))))));
   const cons = tables["constraints.csv"].rows;
   $("#constraints").replaceChildren(h("table", {}, h("thead", {}, h("tr", {}, ["有効", "制約名", "制約クラス", "層", "根拠"].map(x => h("th", {}, x)))),
@@ -156,6 +218,12 @@ function renderParams() {
 // ---------------------------------------------------------------- 実行
 let polling = null;
 async function runEngine() {
+  const ym = param("target_month"), off = body("constraints.csv").filter(r => r[4] !== "1").length;
+  const ok = await ask("エンジンを実行しますか？", [
+    h("p", {}, `対象月: ${ym}（${periodText(ym).split("（")[0]}）`),
+    h("p", {}, `看護師 ${nurseNames().length} 人 ・ 外せる制約 ${body("constraints.csv").length - off} 件が有効（${off} 件をオフ）`),
+    h("p", {class: "muted"}, `${dirty.size ? "未保存の変更を保存してから、" : ""}求解します。解けないときは矛盾の原因の診断まで行うため、数十秒かかることがあります。`)], "実行");
+  if (!ok) return;
   const btn = $("#runbtn"); btn.disabled = true;
   try {
     await saveAll();
@@ -257,8 +325,10 @@ document.querySelectorAll("#tabs button").forEach(b => b.addEventListener("click
 $("#save").addEventListener("click", async () => { try { await saveAll(); toast("保存しました"); } catch (e) { toast("保存できません: " + e.message, 5000); } });
 $("#runbtn").addEventListener("click", runEngine);
 $("#reset").addEventListener("click", async () => {
-  const n = prompt("見本データの看護師数（4以上。常勤:パート = 26:4 の比）", "30"); if (n === null) return;
-  const d = prompt("計画日数", "30"); if (d === null) return;
-  try { await api("POST", "/api/init", {nurses: +n, days: +d}); await loadAll(); toast("見本データで作り直しました"); } catch (e) { toast("作り直せません: " + e.message, 5000); }
+  const nm = h("input", {type: "number", id: "rs-n", value: 30, min: 4, style: "width:5em"});
+  const ym = h("input", {type: "month", id: "rs-m", value: nextMonth()});
+  if (!await ask("見本データに戻しますか？", [h("p", {}, "編集中の入力 CSV は、見本データで置き換わります。"), h("p", {}, "看護師数 ", nm, "（4以上。常勤:パート = 26:4 の比）"), h("p", {}, "対象月 ", ym)], "戻す")) return;
+  try { await api("POST", "/api/init", {nurses: +nm.value, month: ym.value}); await loadAll(); toast("見本データで作り直しました"); } catch (e) { toast("作り直せません: " + e.message, 5000); }
 });
+const nextMonth = () => { const d = new Date(); return `${d.getFullYear() + Math.floor((d.getMonth() + 1) / 12)}-${String((d.getMonth() + 1) % 12 + 1).padStart(2, "0")}`; };
 loadAll().then(async () => { const runs = await api("GET", "/api/runs"); if (runs.length) { selected = runs[0].id; } }).catch(e => toast("読み込めません: " + e.message, 8000));

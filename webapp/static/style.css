@@ -43,3 +43,8 @@ pre{white-space:pre-wrap;background:var(--card);border:1px solid var(--line);pad
 .pg{margin-bottom:14px}
 
 .result{min-width:0}
+
+tr.newday td{border-top:2px solid var(--muted)}
+.tool{margin-left:8px}.tool select,.tool button{margin-left:4px}
+dialog#ask{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);padding:16px 20px;max-width:min(92vw,460px)}
+dialog#ask::backdrop{background:#0006}dialog#ask h3{margin:0 0 8px}.askbody p{margin:6px 0}.askbtns{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}

@@ -8,10 +8,10 @@ CSV ファイルで入出力するエンジンの窓口（Web フロントとエ
 | `shifts.csv` | 勤務の定義（勤務名・開始・終了・区分・勤務扱い・固定専用）。時刻は `HH:MM`（30分単位。翌日にかかる終了は `25:30` のように24時を超えて書く） |
 | `nurses.csv` | 看護師（氏名・取れる勤務・公休数・夜勤リーダー資格・夜勤専従・短時間正職員・算入閾値） |
 | `history.csv` | 前月末の勤務（氏名と、前月末の日ごとの勤務名） |
-| `demand.csv` | 曜日ごとの需要（曜日・開始・終了・必要人数。各曜日を 00:00〜24:00 まで空きなく覆う） |
+| `demand.csv` | 日ごとの需要（日付・開始・終了・必要人数）。対象月の**全日**について、各日を 00:00〜24:00 まで空きなく覆う |
 | `fixed.csv` | 固定割当（氏名・日付・勤務。確定休・有休） |
 | `requests.csv` | 勤務者からの要望（氏名・日付・種別[休み / シフト]・勤務） |
-| `params.csv` | 計画期間・層ごとのパラメータ・ε 制約・時間制限（キー・値・グループ・説明） |
+| `params.csv` | 対象月（`target_month`。期間は月初〜月末）・層ごとのパラメータ・ε 制約・時間制限（キー・値・グループ・説明） |
 | `constraints.csv` | 外せる制約（層2・層3）の一覧と、有効（1）/ 無効（0） |
 
 出力ディレクトリ:
@@ -26,7 +26,7 @@ CSV ファイルで入出力するエンジンの窓口（Web フロントとエ
 使い方:
 
 ```
-python nurse_csv.py init DIR [--nurses 30 --days 30 --seed 0]   # 入力 CSV の見本を作る
+python nurse_csv.py init DIR [--nurses 30 --month 2026-12 --seed 0]   # 入力 CSV の見本を作る
 python nurse_csv.py run IN_DIR OUT_DIR [--log-config パス]       # 読み込み → 求解 → （解けなければ診断）→ 出力 CSV
 ```
 
@@ -34,6 +34,7 @@ python nurse_csv.py run IN_DIR OUT_DIR [--log-config パス]       # 読み込�
 """
 from __future__ import annotations
 import argparse
+import calendar
 import csv
 import logging
 import re
@@ -63,14 +64,13 @@ OUTPUT_FILES = (STATUS, SCHEDULE, CONFLICTS, PRECHECK)
 HEADERS = {
     SHIFTS: ["勤務名", "開始", "終了", "区分", "勤務扱い", "固定専用"],
     NURSES: ["氏名", "取れる勤務", "公休数", "夜勤リーダー資格", "夜勤専従", "短時間正職員", "算入閾値(時間)"],
-    DEMAND: ["曜日", "開始", "終了", "必要人数"],
+    DEMAND: ["日付", "開始", "終了", "必要人数"],
     FIXED: ["氏名", "日付", "勤務"],
     REQUESTS: ["氏名", "日付", "種別", "勤務"],
     PARAMS: ["キー", "値", "グループ", "説明"],
     CONSTRAINTS: ["制約名", "層", "制約クラス", "根拠", "有効"],
 }
 """入力 CSV の見出し（`history.csv` は前月末の日数で列が変わるので別扱い）。"""
-WEEKDAYS = "月火水木金土日"
 KIND_OFF, KIND_SHIFT = "休み", "シフト"
 SEP = "|"
 
@@ -88,8 +88,7 @@ class ParamDef:
 
 
 PARAM_DEFS: tuple[ParamDef, ...] = (
-    ParamDef("start_date", "", "計画", "計画の初日（YYYY-MM-DD）。診断メッセージの日付表記と曜日の基準"),
-    ParamDef("n_days", "30", "計画", "計画日数"),
+    ParamDef("target_month", "", "計画", "対象月（YYYY-MM）。計画期間は月初から月末まで（日数は暦で決まる）"),
     ParamDef("night_avg", "7", "計画", "夜勤回数の平均（夜勤回数の帯の中心）"),
     ParamDef("leader_cats", "E|N", "計画", "夜勤リーダー（資格者）が必須の勤務区分。`|` で区切る"),
     ParamDef("night_cats", "E|N", "計画", "夜勤回数に数える勤務区分。`|` で区切る"),
@@ -278,8 +277,7 @@ def load_input(in_dir: str | Path) -> Loaded:
     d = Path(in_dir)
     log.info("入力を読み込み: %s", d)
     P = _params(d)
-    start = _date(P["start_date"], f"{PARAMS}: start_date")
-    n_days = int(_number(P["n_days"], f"{PARAMS}: n_days", int, 1, 366))
+    start, n_days = month_period(P["target_month"], f"{PARAMS}: target_month")
 
     shifts, sidx = _load_shifts(d)
     nurses = _records(d / NURSES, HEADERS[NURSES][:1] + ["取れる勤務", "公休数"])
@@ -311,7 +309,7 @@ def load_input(in_dir: str | Path) -> Loaded:
     try:
         I = Instance(
             shifts=shifts, domain=domain, n_days=n_days, start_weekday=start.weekday(),
-            history=_load_history(d, names, sidx), demand=_load_demand(d, start.weekday(), n_days), seniors=seniors,
+            history=_load_history(d, names, sidx), demand=_load_demand(d, start, n_days), seniors=seniors,
             leader_cats=tuple(x for x in P["leader_cats"].split(SEP) if x), night_cats=tuple(x for x in P["night_cats"].split(SEP) if x),
             night_avg=_number(P["night_avg"], f"{PARAMS}: night_avg", float, 0), off_days=off_days,
             fixed=_load_fixed(d, nidx, sidx, start, n_days), rules=_load_rules(d, P),
@@ -327,6 +325,22 @@ def load_input(in_dir: str | Path) -> Loaded:
     log.info("入力を読み込み 完了: 看護師 %d 人・%d 日・勤務 %d 種", I.n_nurses, I.n_days, len(shifts))
     return Loaded(I, eps, _number(P["solve_time_limit"], f"{PARAMS}: solve_time_limit", float, 0.1),
                   _number(P["mus_time_limit"], f"{PARAMS}: mus_time_limit", float, 0.1))
+
+
+def month_period(text: str, where: str) -> tuple[date, int]:
+    """対象月 `YYYY-MM` → (月初, 日数)。計画期間は月初から月末まで。
+
+    Args:
+        text: 対象月の文字列（例 `2026-12`）。
+        where: 誤りのとき示す場所。
+
+    Returns:
+        `(月初の日付, その月の日数)`。"""
+    m = re.fullmatch(r"(\d{4})-(\d{2})", text.strip())
+    if not m or not 1 <= int(m.group(2)) <= 12:
+        raise InputError(f"{where}: 対象月は YYYY-MM で書く（例 2026-12）: {text!r}")
+    y, mo = int(m.group(1)), int(m.group(2))
+    return date(y, mo, 1), calendar.monthrange(y, mo)[1]
 
 
 def _date(text: str, where: str) -> date:
@@ -397,30 +411,36 @@ def _load_history(d: Path, names: list[str], sidx: dict[str, int]) -> np.ndarray
     return np.array(out, dtype=int)
 
 
-def _load_demand(d: Path, start_weekday: int, n_days: int) -> list[list[tuple[int, int, int]]]:
-    """demand.csv（曜日ごとの需要）→ 計画日ごとの需要区間
+def _load_demand(d: Path, start: date, n_days: int) -> list[list[tuple[int, int, int]]]:
+    """demand.csv（日ごとの需要）→ 計画日ごとの需要区間。対象月の全日が必要で、各日を 00:00〜24:00 まで空きなく覆う。
 
     Args:
         d: 入力ディレクトリ。
-        start_weekday: 計画初日の曜日（0=月）。
-        n_days: 計画日数。
+        start: 計画の初日（月初）。
+        n_days: 計画日数（月の日数）。
 
     Returns:
         日ごとの `(開始, 終了, 必要人数)` のリスト。"""
-    by_wd: dict[int, list[tuple[int, int, int]]] = {}
+    by_day: dict[int, list[tuple[int, int, int]]] = {}
     for i, r in enumerate(_records(d / DEMAND, HEADERS[DEMAND]), start=2):
         where = f"{DEMAND}: {i}行目"
-        if len(r["曜日"]) != 1 or r["曜日"] not in WEEKDAYS:
-            raise InputError(f"{where}: 曜日は 月火水木金土日 の1文字: {r['曜日']!r}")
+        day = _day_index(r["日付"], start, n_days, where)
         a, b = parse_time(r["開始"], where), parse_time(r["終了"], where)
-        by_wd.setdefault(WEEKDAYS.index(r["曜日"]), []).append((a, b, int(_number(r["必要人数"], f"{where} 必要人数", int, 0))))
-    out = []
-    for day in range(n_days):
-        wd = (start_weekday + day) % 7
-        if wd not in by_wd:
-            raise InputError(f"{DEMAND}: {WEEKDAYS[wd]}曜日の需要がない（00:00〜24:00 を覆う行が必要。需要なしは必要人数 0 で書く）")
-        out.append(sorted(by_wd[wd]))
-    return out
+        by_day.setdefault(day, []).append((a, b, int(_number(r["必要人数"], f"{where} 必要人数", int, 0))))
+    missing = [(start + timedelta(days=day)).isoformat() for day in range(n_days) if day not in by_day]
+    if missing:
+        raise InputError(f"{DEMAND}: 対象月の全日の需要が必要。ない日が {len(missing)} 日ある: {', '.join(missing[:5])}{' …' if len(missing) > 5 else ''}"
+                         "（需要なしの時間帯は必要人数 0 で書く）")
+    for day, bands in by_day.items():
+        pos = 0
+        for a, b, _ in sorted(bands):
+            if a != pos or not a < b:
+                raise InputError(f"{DEMAND}: {(start + timedelta(days=day)).isoformat()}: 00:00〜24:00 を空きなく重なりなく覆う必要がある"
+                                 f"（{format_time(pos)} の位置で不正: {format_time(a)}〜{format_time(b)}）")
+            pos = b
+        if pos != DAY:
+            raise InputError(f"{DEMAND}: {(start + timedelta(days=day)).isoformat()}: 24:00 まで覆っていない（{format_time(pos)} で終わる）")
+    return [sorted(by_day[day]) for day in range(n_days)]
 
 
 def _day_index(text: str, start: date, n_days: int, where: str) -> int:
@@ -551,24 +571,31 @@ TOGGLEABLE_NAMES = frozenset(nm for nm, sp in REGISTRY.items() if sp.scope in ("
 # =============================================================================
 # 入力 CSV の見本（init）
 # =============================================================================
-def write_sample(out_dir: str | Path, n_nurses: int = 30, n_days: int = 30, seed: int = 0) -> None:
-    """合成データから入力 CSV の見本を作る（看護師数は常勤:パート = 26:4 の比）。
+def write_sample(out_dir: str | Path, n_nurses: int = 30, month: str | None = None, seed: int = 0) -> None:
+    """合成データから入力 CSV の見本を作る（看護師数は常勤:パート = 26:4 の比。需要は日ごとに全日分を書く）。
 
     Args:
         out_dir: 書き込み先ディレクトリ。
         n_nurses: 看護師数（常勤とパートの合計。4人以上）。
-        n_days: 計画日数。
+        month: 対象月（YYYY-MM）。省略すると来月。
         seed: 乱数の種（確定休・休み要望）。"""
     if n_nurses < 4:
         raise InputError(f"看護師数は 4 人以上: {n_nurses}")
     out = Path(out_dir)
+    if month is None:
+        today = date.today()
+        month = f"{today.year + today.month // 12}-{today.month % 12 + 1:02d}"
+    start, n_days = month_period(month, "対象月")
     n_part = max(1, round(n_nurses * 4 / 30))
     n_full = n_nurses - n_part
-    today = date.today()
-    start = today + timedelta(days=(7 - today.weekday()) % 7 or 7)          # 次の月曜日
-    I = synthetic(n_full, n_part, T=n_days, seed=seed, start_date=start)
+    I = synthetic(n_full, n_part, T=n_days, seed=seed)                # 勤務・履歴・確定休・要望の元（日は 0 起点の添字）
     names = [f"看護師{i + 1:02d}" for i in range(I.n_nurses)]
     sname = [s.name for s in I.shifts]
+    day_str = lambda d: (start + timedelta(days=d)).isoformat()
+    f = n_full / 26
+    R = lambda r: max(1, round(r * f))
+    demand_rows = [[day_str(d), format_time(a), format_time(b), r] for d in range(n_days)
+                   for a, b, r in ((0, 17, R(3)), (17, 34, R(6 if (start.weekday() + d) % 7 in (5, 6) else 10)), (34, DAY, R(3)))]
     write_table(out / SHIFTS, HEADERS[SHIFTS], [[s.name, format_time(s.start), format_time(s.end), s.cat, int(s.is_work), int(s.fixed_only)]
                                                  for s in I.shifts])
     write_table(out / NURSES, HEADERS[NURSES], [
@@ -576,18 +603,16 @@ def write_sample(out_dir: str | Path, n_nurses: int = 30, n_days: int = 30, seed
          "" if n not in I.incl_threshold else I.incl_threshold[n] / 2] for n in range(I.n_nurses)])
     write_table(out / HISTORY, ["氏名"] + [f"前月末-{I.n_history - k}" for k in range(I.n_history)],
                 [[names[n]] + [sname[s] for s in I.history[n]] for n in range(I.n_nurses)])
-    write_table(out / DEMAND, HEADERS[DEMAND], [[WEEKDAYS[wd], format_time(a), format_time(b), r]
-                                                 for wd in range(7) for a, b, r in I.demand[wd]])
-    day_str = lambda d: (start + timedelta(days=d)).isoformat()
+    write_table(out / DEMAND, HEADERS[DEMAND], demand_rows)
     write_table(out / FIXED, HEADERS[FIXED], [[names[n], day_str(d), sname[s]] for (n, d), s in sorted(I.fixed.items())])
     write_table(out / REQUESTS, HEADERS[REQUESTS], [[names[n], day_str(d), KIND_OFF, ""] for n, ds in sorted(I.req_off.items()) for d in ds]
                 + [[names[n], day_str(d), KIND_SHIFT, sname[s]] for n, ds in sorted(I.req_shift.items()) for d, s in ds])
     defaults = {p.key: p.default for p in PARAM_DEFS}
-    defaults.update(start_date=start.isoformat(), n_days=str(n_days), night_avg=f"{I.night_avg:g}")
+    defaults.update(target_month=month, night_avg=f"{I.night_avg:g}")
     write_table(out / PARAMS, HEADERS[PARAMS], [[p.key, defaults[p.key], p.group, p.doc] for p in PARAM_DEFS])
     write_table(out / CONSTRAINTS, HEADERS[CONSTRAINTS], [[nm, SCOPE_NAMES[sp.scope], sp.title, SEP.join(sp.source), 1]
                                                            for nm, sp in REGISTRY.items() if nm in TOGGLEABLE_NAMES])
-    log.info("入力 CSV の見本を作成: %s（看護師 %d 人・%d 日）", out, I.n_nurses, n_days)
+    log.info("入力 CSV の見本を作成: %s（看護師 %d 人・%s・%d 日）", out, I.n_nurses, month, n_days)
 
 
 # =============================================================================
@@ -666,7 +691,7 @@ def main(argv: list[str] | None = None) -> int:
     p_init = sub.add_parser("init", help="入力 CSV の見本を作る")
     p_init.add_argument("dir")
     p_init.add_argument("--nurses", type=int, default=30)
-    p_init.add_argument("--days", type=int, default=30)
+    p_init.add_argument("--month", default=None, help="対象月（YYYY-MM）。省略すると来月")
     p_init.add_argument("--seed", type=int, default=0)
     p_run = sub.add_parser("run", help="入力 CSV を読み、求解して出力 CSV を書く")
     p_run.add_argument("in_dir")
@@ -675,7 +700,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     if args.cmd == "init":
         try:
-            write_sample(args.dir, args.nurses, args.days, args.seed)
+            write_sample(args.dir, args.nurses, args.month, args.seed)
         except NurseError as e:
             print(f"エラー: {e}", file=sys.stderr)
             return int(code_of(e))

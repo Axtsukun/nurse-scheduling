@@ -50,16 +50,16 @@ class Workspace:
         self.running: str | None = None            # 実行中の実行ID（同時に1つだけ）
         self.runs.mkdir(parents=True, exist_ok=True)
 
-    def init_input(self, nurses: int = 30, days: int = 30, seed: int = 0) -> None:
+    def init_input(self, nurses: int = 30, month: str = "", seed: int = 0) -> None:
         """入力 CSV を見本で作り直す（エンジンの `init`）。
 
         Args:
             nurses: 看護師数。
-            days: 計画日数。
+            month: 対象月（YYYY-MM）。空なら来月。
             seed: 乱数の種。"""
         tmp = self.root / "input.tmp"
         shutil.rmtree(tmp, ignore_errors=True)
-        r = subprocess.run([sys.executable, str(ENGINE), "init", str(tmp), "--nurses", str(nurses), "--days", str(days), "--seed", str(seed)],
+        r = subprocess.run([sys.executable, str(ENGINE), "init", str(tmp), "--nurses", str(nurses), "--seed", str(seed), *(["--month", month] if month else [])],
                            capture_output=True, text=True, cwd=ROOT)
         if r.returncode != 0:
             raise ValueError((r.stderr or r.stdout).strip())
@@ -257,7 +257,7 @@ def make_handler(ws: Workspace) -> type[BaseHTTPRequestHandler]:
             try:
                 if self.path == "/api/init":
                     b = self.body() or {}
-                    ws.init_input(int(b.get("nurses", 30)), int(b.get("days", 30)), int(b.get("seed", 0)))
+                    ws.init_input(int(b.get("nurses", 30)), str(b.get("month", "")), int(b.get("seed", 0)))
                     return self.send_json({"ok": True})
                 if self.path == "/api/run":
                     return self.send_json({"id": ws.start_run()}, HTTPStatus.ACCEPTED)

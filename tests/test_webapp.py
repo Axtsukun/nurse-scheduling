@@ -51,7 +51,7 @@ def test_input_csv_round_trip(base: str) -> None:
     assert call(base, "GET", "/api/input/nurses.csv")[1]["rows"][1][0] == "山田,太郎"
     assert call(base, "PUT", "/api/input/nurses.csv", {"rows": "x"})[0] == 400
     assert call(base, "PUT", "/api/input/other.csv", {"rows": [["a"]]})[0] == 404
-    assert call(base, "POST", "/api/init", {"nurses": 30, "days": 30})[0] == 200          # 見本に戻す
+    assert call(base, "POST", "/api/init", {"nurses": 30, "month": "2026-12"})[0] == 200          # 見本に戻す
     assert call(base, "GET", "/api/input/nurses.csv")[1]["rows"][1][0] == "看護師01"
     assert call(base, "POST", "/api/init", {"nurses": 2})[0] == 400
 
@@ -70,25 +70,28 @@ def test_run_keeps_input_and_output_and_allows_review(base: str) -> None:
     assert st == 202
     assert call(base, "POST", "/api/run")[0] == 409                 # 実行中は同時に実行できない
     info = wait_done(base, r["id"])
-    assert info["returncode"] == 0 and info["status"] == "feasible" and info["n_nurses"] == "30"
+    assert info["returncode"] == 0 and info["status"] == "feasible" and (info["n_nurses"], info["n_days"]) == ("30", "31")
     sched = call(base, "GET", f"/api/runs/{r['id']}/output/schedule.csv")[1]["rows"]
-    assert len(sched) == 31
+    assert len(sched) == 31 and len(sched[0]) == 32          # 看護師30人、12月は31日
     # 実行後に入力を変えても、その実行の入力は残る（後から結果を見直せる）
     t = call(base, "GET", "/api/input/params.csv")[1]["rows"]
-    t[2][1] = "5"
+    month = next(x for x in t if x[0] == "target_month")
+    assert month[1] == "2026-12"
+    month[1] = "2027-01"
     call(base, "PUT", "/api/input/params.csv", {"rows": t})
-    assert call(base, "GET", f"/api/runs/{r['id']}/input/params.csv")[1]["rows"][2][1] == "30"
+    kept = call(base, "GET", f"/api/runs/{r['id']}/input/params.csv")[1]["rows"]
+    assert next(x for x in kept if x[0] == "target_month")[1] == "2026-12"
     assert [x["id"] for x in call(base, "GET", "/api/runs")[1]][0] == r["id"]
     assert call(base, "GET", f"/api/runs/{r['id']}/log")[1]["text"]
 
 
 def test_input_error_is_shown_as_a_result(base: str) -> None:
-    call(base, "POST", "/api/init", {"nurses": 30, "days": 30})
+    call(base, "POST", "/api/init", {"nurses": 30, "month": "2026-12"})
     t = call(base, "GET", "/api/input/params.csv")[1]["rows"]
-    t[2][1] = "0"                                                   # n_days=0
+    next(x for x in t if x[0] == "target_month")[1] = "2026-13"      # 不正な月
     call(base, "PUT", "/api/input/params.csv", {"rows": t})
     rid = call(base, "POST", "/api/run")[1]["id"]
     info = wait_done(base, rid)
     assert info["returncode"] == 30 and info["status"] == "error"
     st = call(base, "GET", f"/api/runs/{rid}/output/status.csv")[1]["rows"]
-    assert any(r[0] == "message" and "n_days" in r[1] for r in st)
+    assert any(r[0] == "message" and "target_month" in r[1] for r in st)
