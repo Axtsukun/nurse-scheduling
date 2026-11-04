@@ -38,7 +38,7 @@ const SCHEMA = {
     cols: {"勤務名": {}, "開始": {type: "time"}, "終了": {type: "time"}, "区分": {type: "text", list: Object.keys(CATS)}, "勤務扱い": {type: "bool"}, "固定専用": {type: "bool"}}},
   "nurses.csv": {title: "看護師", help: "取れる勤務は、その人が就ける勤務（「休」を含める）。夜勤リーダー資格者は、夜勤の各時間帯に1人以上必要です。氏名を変えると、他の表の氏名も書き換えます。",
     cols: {"氏名": {}, "取れる勤務": {type: "multi", opts: shiftNames}, "公休数": {type: "number"}, "夜勤リーダー資格": {type: "bool"}, "夜勤専従": {type: "bool"}, "短時間正職員": {type: "bool"}, "算入閾値(時間)": {type: "number", step: 0.5}}},
-  "history.csv": {title: "前月末の履歴", help: "計画の直前の勤務（連続勤務・勤務間隔の判定に使う）。列は前月末の日ごとの勤務。",
+  "history.csv": {title: "前月末の履歴", help: "前月の実績の末尾5日分を入れる（計画の最初の日の連続勤務・勤務間隔・週の休日の判定に使う。見本は合成データで、実際の前月の勤務表ではない）。履歴の中の違反（勤務間隔・連続勤務の上限超え、取れない勤務）は、過去の実績なので計画では直せない。実行時に警告として表示するだけで、求解は止めない。なお、履歴は5日分なので、計画の初日が日曜日の月は、第1週の休日が検査されない。",
     cols: {"氏名": {type: "select", opts: nurseNames}, "*": {type: "select", opts: shiftNames}}},
   "demand.csv": {title: "需要（日ごと）", help: "対象月の全日について、各日を 00:00〜24:00 まで空きなく覆うように、時間帯ごとの必要人数を書く。需要なしの時間帯は必要人数 0。上のバーで、ある日の需要を他の日へコピーできる。",
     cols: {"日付": {type: "date"}, "開始": {type: "time"}, "終了": {type: "time"}, "必要人数": {type: "number"}}},
@@ -253,14 +253,16 @@ const banner = (st, text) => h("div", {class: `banner ${st.status}`}, h("b", {},
 async function showRun(id) {
   selected = id; await renderHistory();
   const get = (d, n) => api("GET", `/api/runs/${id}/${d}/${n}`).then(t => t.rows);
-  const [status, schedule, conflicts, precheck, shifts, fixed, reqs] = await Promise.all(
-    [["output", "status.csv"], ["output", "schedule.csv"], ["output", "conflicts.csv"], ["output", "precheck.csv"], ["input", "shifts.csv"], ["input", "fixed.csv"], ["input", "requests.csv"]].map(([d, n]) => get(d, n)));
+  const [status, schedule, conflicts, precheck, warnings, shifts, fixed, reqs] = await Promise.all(
+    [["output", "status.csv"], ["output", "schedule.csv"], ["output", "conflicts.csv"], ["output", "precheck.csv"], ["output", "warnings.csv"], ["input", "shifts.csv"], ["input", "fixed.csv"], ["input", "requests.csv"]].map(([d, n]) => get(d, n)));
   const st = Object.fromEntries(status.slice(1).map(r => [r[0], r[1]]));
   if (!st.status) { $("#result").replaceChildren(banner({status: "error", label: "結果がありません（エンジンが異常終了した可能性）"}), h("button", {onclick: () => showLog(id)}, "実行ログを見る")); return; }
   const out = [banner(st, `所要 ${st.seconds} 秒 ・ 看護師 ${st.n_nurses} 人 ・ ${st.n_days} 日 ・ 開始日 ${st.start_date || ""}`)];
   if (st.status === "feasible") out.push(...scheduleView(schedule, shifts, fixed, reqs));
   else if (st.status === "conflict") out.push(conflictView(conflicts, st));
   else out.push(h("pre", {}, st.message));
+  if (warnings.length > 1) out.push(h("div", {class: "banner timeout"}, h("b", {}, `入力の警告 ${warnings.length - 1} 件`), "　履歴に、制約を破っている箇所があります（過去の実績なので、求解は続けています）。",
+    h("ul", {}, warnings.slice(1).map(r => h("li", {}, r[1])))));
   if (precheck.length > 1) out.push(h("details", {}, h("summary", {}, `事前検査の指摘（${precheck.length - 1} 件）: 需要と供給の単純な不足`), h("pre", {}, precheck.slice(1).map(r => r[0]).join("\n"))));
   out.push(h("details", {}, h("summary", {}, "診断メッセージの全文・実行ログ"), h("pre", {}, st.message), h("button", {onclick: e => showLog(id, e.target)}, "エンジンの実行ログを表示")));
   $("#result").replaceChildren(...out);

@@ -22,6 +22,7 @@ CSV ファイルで入出力するエンジンの窓口（Web フロントとエ
 | `schedule.csv` | 勤務表（解が見つかったとき）。看護師 × 日付 |
 | `conflicts.csv` | 矛盾する制約の一覧（実行不可能のとき。区分は `前提`＝オフにできない制約 / `外せる`） |
 | `precheck.csv` | 事前検査（需要と供給の単純な不足）の指摘 |
+| `warnings.csv` | 入力の警告（前月末の履歴が、履歴の内部で勤務間隔・連続勤務の上限を破っている、取れない勤務を含む、など）。求解は止めない |
 
 使い方:
 
@@ -57,8 +58,8 @@ SHIFTS, NURSES, HISTORY, DEMAND, FIXED, REQUESTS, PARAMS, CONSTRAINTS = (
     "shifts.csv", "nurses.csv", "history.csv", "demand.csv", "fixed.csv", "requests.csv", "params.csv", "constraints.csv")
 INPUT_FILES = (SHIFTS, NURSES, HISTORY, DEMAND, FIXED, REQUESTS, PARAMS, CONSTRAINTS)
 """入力 CSV のファイル名（読み込む順）。"""
-STATUS, SCHEDULE, CONFLICTS, PRECHECK = "status.csv", "schedule.csv", "conflicts.csv", "precheck.csv"
-OUTPUT_FILES = (STATUS, SCHEDULE, CONFLICTS, PRECHECK)
+STATUS, SCHEDULE, CONFLICTS, PRECHECK, WARNINGS = "status.csv", "schedule.csv", "conflicts.csv", "precheck.csv", "warnings.csv"
+OUTPUT_FILES = (STATUS, SCHEDULE, CONFLICTS, PRECHECK, WARNINGS)
 """出力 CSV のファイル名。"""
 
 HEADERS = {
@@ -568,6 +569,37 @@ TOGGLEABLE_NAMES = frozenset(nm for nm, sp in REGISTRY.items() if sp.scope in ("
 """オフにできる制約名（層2・層3）。"""
 
 
+def check_history(I: Instance) -> list[str]:
+    """前月末の履歴の警告。履歴は過去の実績なので、違反があっても求解は止めない（計画では直せない）。
+    履歴の内部の勤務間隔・連続勤務の上限と、看護師が取れない勤務を調べる。履歴と計画初日にまたがる制約は、求解が扱う。
+
+    Args:
+        I: 入力データ（履歴の日付は `start_date` から数える）。
+
+    Returns:
+        警告文のリスト。違反がなければ空。"""
+    assert I.start_date is not None and I.nurse_names is not None
+    H, S = I.n_history, I.shifts
+    day = lambda k: (I.start_date - timedelta(days=H - k)).strftime("%m/%d")           # 履歴 k 日目（0 起点）の日付
+    out: list[str] = []
+    for n in range(I.n_nurses):
+        who, seq = I.nurse_names[n], [S[s] for s in I.history[n]]
+        for k, sid in enumerate(I.history[n]):
+            if int(sid) not in I.domain[n]:
+                out.append(f"{who} {day(k)}: 取れる勤務に入っていない勤務「{S[sid].name}」（{NURSES} の「取れる勤務」を確認）")
+        for k in range(H - 1):
+            a, b = seq[k], seq[k + 1]
+            gap = (b.start + DAY) - a.end
+            if a.is_work and b.is_work and gap < I.min_rest:
+                out.append(f"{who} {day(k)}→{day(k + 1)}: {a.name}→{b.name} の勤務間隔が {gap / 2:g}時間（下限 {I.min_rest / 2:g}時間）")
+        run = 0
+        for k, x in enumerate(seq):
+            run = run + 1 if x.is_work else 0
+            if run == I.max_consec_work + 1:
+                out.append(f"{who} {day(k - run + 1)}〜{day(k)}: 連続勤務が上限 {I.max_consec_work} 日を超えている")
+    return out
+
+
 # =============================================================================
 # 入力 CSV の見本（init）
 # =============================================================================
@@ -647,8 +679,12 @@ def run_dir(in_dir: str | Path, out_dir: str | Path) -> ReturnCode:
         issues = precheck(I, eps)
         log.info("事前検査: %s", f"NG {len(issues)} 件" if issues else "OK")
         write_table(out / PRECHECK, ["指摘"], [[x] for x in issues])
+        warns = check_history(I)
+        for w in warns:
+            log.warning("履歴の警告: %s", w)
+        write_table(out / WARNINGS, ["区分", "内容"], [["履歴", w] for w in warns])
         res = solve(I, eps, time_limit=L.solve_time_limit)
-        common: list[tuple[str, object]] = [("n_nurses", I.n_nurses), ("n_days", I.n_days), ("start_date", I.start_date)]
+        common: list[tuple[str, object]] = [("n_nurses", I.n_nurses), ("n_days", I.n_days), ("start_date", I.start_date), ("warnings", len(warns))]
         if res.ok:
             A = extract(res.model)
             start, names = I.start_date, I.nurse_names

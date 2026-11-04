@@ -166,3 +166,47 @@ def test_cli_exit_codes(sample: pathlib.Path, tmp_path: pathlib.Path) -> None:
     assert c.main(["run", str(bad), str(tmp_path / "out")]) == int(ReturnCode.INPUT_ERROR)
     assert c.main(["init", str(tmp_path / "bad_month"), "--month", "2026-13"]) == int(ReturnCode.INPUT_ERROR)
     assert c.main(["init", str(tmp_path / "small"), "--nurses", "2"]) == int(ReturnCode.INPUT_ERROR)
+
+
+def _with_history(src: pathlib.Path, dst: pathlib.Path, row: list[str]) -> pathlib.Path:
+    """history.csv の先頭の看護師（看護師01）の履歴を row（前月末の5日分）に差し替えた入力を作る"""
+    d = _copy(src, dst)
+    rows = _read(d / "history.csv")
+    rows[1] = [rows[1][0], *row]
+    c.write_table(d / "history.csv", rows[0], rows[1:])
+    return d
+
+
+def test_the_sample_history_has_no_warning(sample: pathlib.Path) -> None:
+    assert c.check_history(c.load_input(sample).instance) == []
+
+
+def test_history_warns_about_a_rest_interval_violation_inside_the_history(sample: pathlib.Path, tmp_path: pathlib.Path) -> None:
+    I = c.load_input(_with_history(sample, tmp_path / "in", ["準", "日", "日", "日", "日"])).instance       # 準夜は翌1:00終了、日勤は翌8:30開始 = 7.5時間
+    assert c.check_history(I) == ["看護師01 05/27→05/28: 準→日 の勤務間隔が 7.5時間（下限 11時間）"]
+    # 深夜（0:30〜9:00）の翌日の日勤（8:30〜）は 23.5 時間あいているので違反ではない
+    assert c.check_history(c.load_input(_with_history(sample, tmp_path / "in2", ["休", "深", "日", "日", "日"])).instance) == []
+
+
+def test_history_warns_about_too_many_consecutive_work_days(sample: pathlib.Path, tmp_path: pathlib.Path) -> None:
+    d = _with_history(sample, tmp_path / "in", ["日", "日", "日", "日", "日"])
+    c.write_table(d / "params.csv", ["キー", "値", "グループ", "説明"],
+                  [[r[0], "3" if r[0] == "max_consec_work" else r[1], r[2], r[3]] for r in _read(d / "params.csv")[1:]])
+    ws = [w for w in c.check_history(c.load_input(d).instance) if w.startswith("看護師01 ")]          # 上限を3日にすると、他の人の4連勤も警告になる
+    assert ws == ["看護師01 05/27〜05/30: 連続勤務が上限 3 日を超えている"]
+
+
+def test_history_warns_about_a_shift_the_nurse_cannot_take(sample: pathlib.Path, tmp_path: pathlib.Path) -> None:
+    d = _with_history(sample, tmp_path / "in", ["P4a", "休", "休", "休", "休"])          # 常勤の看護師01 は P4a（パートの勤務）を取れない
+    assert c.check_history(c.load_input(d).instance) == ["看護師01 05/27: 取れる勤務に入っていない勤務「P4a」（nurses.csv の「取れる勤務」を確認）"]
+
+
+def test_run_reports_history_warnings_but_still_solves(sample: pathlib.Path, tmp_path: pathlib.Path) -> None:
+    d = _with_history(sample, tmp_path / "in", ["準", "日", "日", "日", "日"])
+    out = tmp_path / "out"
+    assert c.run_dir(d, out) == ReturnCode.OK                                  # 履歴の違反は警告であって、求解は止めない
+    assert _read(out / "warnings.csv") == [["区分", "内容"], ["履歴", "看護師01 05/27→05/28: 準→日 の勤務間隔が 7.5時間（下限 11時間）"]]
+    assert {r[0]: r[1] for r in _read(out / "status.csv")[1:]}["warnings"] == "1"
+    clean = tmp_path / "out2"
+    c.run_dir(sample, clean)
+    assert _read(clean / "warnings.csv") == [["区分", "内容"]]

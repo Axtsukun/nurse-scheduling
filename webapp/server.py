@@ -30,7 +30,7 @@ ROOT = HERE.parent
 STATIC = HERE / "static"
 ENGINE = ROOT / "nurse_csv.py"
 INPUT_FILES = ("shifts.csv", "nurses.csv", "history.csv", "demand.csv", "fixed.csv", "requests.csv", "params.csv", "constraints.csv")
-OUTPUT_FILES = ("status.csv", "schedule.csv", "conflicts.csv", "precheck.csv")
+OUTPUT_FILES = ("status.csv", "schedule.csv", "conflicts.csv", "precheck.csv", "warnings.csv")
 RUN_ID = re.compile(r"^\d{8}-\d{6}(-\d+)?$")
 MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
 
