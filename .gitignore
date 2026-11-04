@@ -4,3 +4,4 @@ __pycache__/
 .venv/
 _site/
 logs/
+webapp/workspace/

@@ -203,7 +203,7 @@ def test_pages_site_builds_without_warnings(tmp_path: pathlib.Path) -> None:
 def test_api_reference_covers_every_module() -> None:
     """API リファレンス（docs/api/）が、全モジュールを漏れなく載せ、mkdocs.yml の nav にも入っていること。
     モジュールを足したのにページを足し忘れると、ここで気づく。"""
-    modules = ["nurse_csp", "verify", "evaluate", "nurse"] + [f"nurse.{p.stem}" for p in PKG.glob("*.py") if p.stem != "__init__"]
+    modules = ["nurse_csp", "nurse_csv", "verify", "evaluate", "nurse"] + [f"nurse.{p.stem}" for p in PKG.glob("*.py") if p.stem != "__init__"]
     nav = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
     for m in modules:
         page = ROOT / "docs/api" / f"{m}.md"
@@ -215,7 +215,7 @@ def test_api_reference_covers_every_module() -> None:
 
 
 # ---- API 文書の読みやすさ（docstring） ----
-_API_FILES = [ROOT / f for f in ("nurse_csp.py", "verify.py", "evaluate.py")] + sorted(PKG.glob("*.py"))
+_API_FILES = [ROOT / f for f in ("nurse_csp.py", "nurse_csv.py", "verify.py", "evaluate.py")] + sorted(PKG.glob("*.py"))
 
 
 def _functions(body: list[ast.stmt], prefix: str = "") -> Iterator[tuple[str, ast.FunctionDef]]:
@@ -289,7 +289,7 @@ def test_every_function_documents_its_args_and_returns() -> None:
 
 
 # ---- 型ヒント ----
-_TYPED_FILES = _API_FILES + sorted((ROOT / "tools").glob("*.py")) + sorted((ROOT / "tests").glob("*.py"))
+_TYPED_FILES = _API_FILES + sorted((ROOT / "tools").glob("*.py")) + sorted((ROOT / "webapp").glob("*.py")) + sorted((ROOT / "tests").glob("*.py"))
 
 
 def test_every_function_has_type_hints() -> None:

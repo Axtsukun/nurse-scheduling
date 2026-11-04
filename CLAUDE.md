@@ -20,6 +20,8 @@ nurse/                  # エンジン本体（依存は下向きのみ）
   diagnosis.py          # 解けないときの診断（時間切れ / 制約矛盾 → MUS を exact で求め、日本語で説明）
   synthetic.py          # 合成インスタンス・個別要望の付与
 nurse_csp.py            # 互換の窓口（import nurse_csp as m）と CLI（終了コード = ReturnCode）
+nurse_csv.py            # CSV で入出力する窓口（init=見本作成 / run=読み込み→求解→診断→出力 CSV。Web アプリとの IF）
+webapp/                 # サンプル Web アプリ（server.py + static/。標準ライブラリのみ。ローカル用。workspace/ は Git 管理外）
 nurse.properties        # 設定ファイル（solve.time_limit / mus.time_limit。既定は各30秒）
 nurse.logging.yaml      # ログの設定（YAML または JSON。出力先・レベル・ローテーション）
 verify.py               # 独立検証器（制約名ごとの検査関数 CHECKS）
@@ -58,6 +60,7 @@ tests/
 - **設定とリターンコード（決定事項）**：求解と MUS の時間制限は `nurse.properties`（`solve.time_limit`・`mus.time_limit`、既定は各30秒）に外出しし、`solve()`・`diagnose()` は引数を省略するとこれを使う（`config.load_settings`。呼ぶたびに読み直す）。結果は `ReturnCode`（0 正常 / 10 求解が時間切れ / 20 制約矛盾 / 21 MUS が時間切れ / 22 原因を特定できず / 30 入力・設定の誤り / 40 ソルバー・環境 / 50 内部エラー）で表し、`Diagnosis.code` と CLI の終了コードに使う。入力・設定の誤りは `InputError`（`ValueError` の一種）、環境は `SolverUnavailableError`、内部は `InternalError`（どちらも `RuntimeError` の一種）。新しい例外・状態を足すときは `nurse/codes.py` にコードを足す。
 - **ログ（決定事項）**：標準出力とファイルの**両方**に出し、**親 `nurse`（①プログラム全体）と子 `nurse.engine`（②エンジン求解詳細＝CP-SAT の標準ログ）の2系統**にする。②は既定で①にも流す（`engine.propagate: true`。①の1本で時系列に追える。親へ流れた行は①のレベルで絞られ、標準出力は二重にしない。`false` なら①は処理の流れだけ）。設定は YAML か JSON（`nurse.logging.yaml`。`--log-config` > 環境変数 `NURSE_LOGGING` > リポジトリ直下 > 既定値）。**全行にタイムスタンプ・メソッド（`funcName`）・メッセージを必ず含める**（書式から外すと `InputError`）。ファイルは `RotatingFileHandler`（既定 10MB × 5世代）。モジュールは `logging.getLogger(__name__)` を使い（`print` でログを出さない）、`setup_logging()` はライブラリ側では呼ばない（CLI だけ。呼ばない間は何も出さない）。ソルバーのログは `attach_engine_log`（CP-SAT のパラメータを直接設定。CPMpy の `log_search_progress` は、標準出力の差し替え時にコールバックを `print` に上書きするので使わない）。**ログのメソッド欄は公開の関数名にする**（ヘルパー `_x` の中のログは `stacklevel` で呼び出し元に寄せる。tests/test_logger.py が検査）。標準出力のエンジンログ（既定で出す）は、開発者がデバッグ時に見る用。個別の変数・制約は DEBUG、総数は INFO。ログが無効なとき、数える処理を飛ばして求解を変えない。tests/conftest.py が、テストのログの出力先を一時ディレクトリにする。
 - **有給休暇（決定事項）**：付与日数・比例付与・年5日の取得の**管理は利用者が行う**（システムの対象外）。システムは、利用者が入力した取得日だけを固定割当（`fixed`、hard）として受け取り、その日を「有休」にする。有休は `fixed_only` の勤務で、常勤・パートを問わず誰にも固定できるが、ソルバーが選ぶ値ではない（シフト要望にも使えない）。日数の検査・年5日の確保・残日数の管理は実装しない。
+- **Web アプリとエンジンの IF は CSV ファイル（決定事項）**：`webapp/server.py` は、エンジンの Python コードを import せず、`nurse_csv.py run`（別プロセス）を起動して、入力 CSV・出力 CSV・終了コードだけで受け渡す。**計画期間は月単位**（`params.csv` の `target_month`=YYYY-MM → 月初〜月末。開始日・日数は持たない）で、**需要（`demand.csv`）は対象月の全日分を日付つきで持つ**（曜日パターンではない。足りない日は `InputError`）。実行ボタンは毎回、画面内のダイアログで OK / キャンセルを確認する（`confirm()` は使わない）。**前月末の履歴は前月の実績**で、履歴の内部の違反（勤務間隔・連続勤務の上限・取れない勤務）は `check_history` が `warnings.csv` に警告する（求解は止めない。履歴と計画初日にまたがる制約は求解が扱う）。入力は `shifts/nurses/history/demand/fixed/requests/params/constraints.csv`、出力は `status/schedule/conflicts/precheck/warnings.csv`（仕様は `nurse_csv.py` の docstring と README 4.9）。実行ごとの入力・出力は `webapp/workspace/runs/<日時>/` に保管し、結果（矛盾の一覧を含む）をいつでも見直せる。入力の誤りは `InputError`（ファイル名・行つき）→ `status.csv` の `error`・終了コード30。CSV の列やパラメータを足すときは、`nurse_csv.py`（`PARAM_DEFS`・読み込み・`write_sample`）、`webapp/static/app.js` の `SCHEMA`、`tests/test_csv.py` を揃える。
 - **パターン化（週パターン列挙）は採用しない**（規模が約100倍、CSPではLP緩和の利点が活きない）。
 
 ## 前提と教訓（メモ。入力の定義と設計の判断を誤らないために）
