@@ -88,7 +88,7 @@ class OptionalConstraints(ModelKernel):
             wks = []
             for sat, sun in weekend_pairs(self.I):
                 a, b = self.work(n, self.t(sat)), self.work(n, self.t(sun))
-                wk = cp.boolvar(name=f"wk_{n}_{sat}")
+                wk = cp.intvar(0, 1, name=f"wk_{n}_{sat}")
                 out += [Aux(wk >= a), Aux(wk >= b), Aux(wk <= a + b)]
                 wks.append(wk)
             if wks:
@@ -131,7 +131,7 @@ class OptionalConstraints(ModelKernel):
             g = [n for n in self.N if is_part(I, n) == flag]
             if len(g) < 2:
                 continue
-            p = cp.boolvar(shape=E + 1, name=f"wsp_{int(flag)}")
+            p = cp.intvar(0, 1, shape=E + 1, name=f"wsp_{int(flag)}")
             m = cp.sum([k * p[k] for k in range(E + 1)])
             out.append(Aux(cp.sum(p) == 1))
             who = "パート" if flag else "正規"
