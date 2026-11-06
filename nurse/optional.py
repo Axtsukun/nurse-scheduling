@@ -118,7 +118,7 @@ class OptionalConstraints(ModelKernel):
     def c_weekend_spread(self) -> Constraints:
         """土日勤務日数 e_n = Σ_{d∈土日} w[n,H+d] について、区分 g(正規/パート)ごとに
         max_n e_n − min_n e_n ≤ Δ_g ⇔ ある窓下端 m_g があって m_g ≤ e_n ≤ m_g + Δ_g（n ∈ g）。
-        m_g = Σ_k k·p[g,k]（p[g,·] は one-hot の Boolean。cp.intvar は使わない）。
+        m_g = Σ_k k·p[g,k]（p[g,·] は one-hot の 0/1 変数（intvar(0, 1)））。
         制約本数は全ペア方式の O(|g|²) に対し O(|g|)。識別子 p[g,k] → `p`
 
         Returns:
