@@ -88,7 +88,7 @@ class OptionalConstraints(ModelKernel):
             wks = []
             for sat, sun in weekend_pairs(self.I):
                 a, b = self.work(n, self.t(sat)), self.work(n, self.t(sun))
-                wk = cp.boolvar(name=f"wk_{n}_{sat}")
+                wk = cp.intvar(0, 1, name=f"wk_{n}_{sat}")
                 out += [Aux(wk >= a), Aux(wk >= b), Aux(wk <= a + b)]
                 wks.append(wk)
             if wks:
@@ -118,7 +118,7 @@ class OptionalConstraints(ModelKernel):
     def c_weekend_spread(self) -> Constraints:
         """土日勤務日数 e_n = Σ_{d∈土日} w[n,H+d] について、区分 g(正規/パート)ごとに
         max_n e_n − min_n e_n ≤ Δ_g ⇔ ある窓下端 m_g があって m_g ≤ e_n ≤ m_g + Δ_g（n ∈ g）。
-        m_g = Σ_k k·p[g,k]（p[g,·] は one-hot の Boolean。cp.intvar は使わない）。
+        m_g = Σ_k k·p[g,k]（p[g,·] は one-hot の 0/1 変数（intvar(0, 1)））。
         制約本数は全ペア方式の O(|g|²) に対し O(|g|)。識別子 p[g,k] → `p`
 
         Returns:
@@ -131,7 +131,7 @@ class OptionalConstraints(ModelKernel):
             g = [n for n in self.N if is_part(I, n) == flag]
             if len(g) < 2:
                 continue
-            p = cp.boolvar(shape=E + 1, name=f"wsp_{int(flag)}")
+            p = cp.intvar(0, 1, shape=E + 1, name=f"wsp_{int(flag)}")
             m = cp.sum([k * p[k] for k in range(E + 1)])
             out.append(Aux(cp.sum(p) == 1))
             who = "パート" if flag else "正規"

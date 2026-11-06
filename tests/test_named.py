@@ -209,3 +209,20 @@ def test_build_named_reuses_the_result_for_the_same_enabled_set() -> None:
     assert M.build_named(mandatory)["struct"][0] is sub["struct"][0]                # 同じ集合なら、また再利用
     full = M.build_named()
     assert full["cover"][0] is a["cover"][0] and M.is_active("cover")               # 元の結果も残り、有効な集合の記録も戻る
+
+
+def test_no_two_constraints_share_one_expression_object_even_when_only_one_value_is_possible() -> None:
+    """`boolvar` なら `x == 1` が変数そのものに簡約され、`struct`・`history`・`fixed` が同じ式オブジェクトを共有した（n : 1）。
+    診断は `id()` で制約を対応づけるので、共有があると崩れうる。0/1 を `intvar(0, 1)` にして、共有しないことを確かめる。
+    （取れる勤務が「休」だけのパートに、休の固定割当を足した入力）"""
+    I = m.synthetic()
+    off = I.idx(m.OFF_NAME)
+    part_only_off = set(range(26, I.n_nurses))
+    domain = [[off] if n in part_only_off else d for n, d in enumerate(I.domain)]
+    history = I.history.copy()
+    history[list(part_only_off), :] = off
+    fixed = {**I.fixed, **{(27, d): off for d in (3, 4)}}
+    J = dc.replace(I, domain=domain, history=history, fixed=fixed)
+    flat = [x for items in m.NurseModel(J, m.Eps()).build_named().values() for x in items]
+    ids = [id(x.expr) for x in flat]
+    assert len(set(ids)) == len(ids), "同じ式オブジェクトを共有する制約がある"
