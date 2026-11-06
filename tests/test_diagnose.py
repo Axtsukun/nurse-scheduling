@@ -153,3 +153,38 @@ def test_mus_time_limit_too_short_to_find_any_core_reports_unidentified_cause() 
     d = m.diagnose(_inst_72h_extreme(), m.Eps(), time_limit=60, mus_time_limit=0.001)
     assert d.status == m.CONFLICT and not d.items and not d.minimal and d.code == m.ReturnCode.CONFLICT_UNIDENTIFIED
     assert "特定できませんでした" in d.explain()
+
+
+# ---- 変数が1つもない制約（Python の定数になる式）も、矛盾として診断できる ----
+def _inst_no_leader() -> m.Instance:
+    """夜勤リーダーの資格者が0人（`cp.sum([]) >= 1` が Python の `False` になる）"""
+    return dc.replace(m.synthetic(), seniors=[])
+
+
+def _inst_leaders_cannot_work_nights() -> m.Instance:
+    """資格者は10人いるが、全員が準夜・深夜を取れない（取れる勤務にも履歴にも夜勤がない）。資格者0人と同じ、空の合計になる"""
+    I = m.synthetic()
+    day_only = [s for s, sd in enumerate(I.shifts) if sd.cat in ("OFF", "D", "LV")]
+    hist = I.history.copy()
+    hist[I.seniors, :] = I.idx("休")                        # 履歴の勤務は、取れる値（D_n）に入るので、夜勤を外す
+    domain = [[s for s in d if s in day_only] if n in I.seniors else d for n, d in enumerate(I.domain)]
+    return dc.replace(I, domain=domain, history=hist)
+
+
+@pytest.mark.parametrize("make", [_inst_no_leader, _inst_leaders_cannot_work_nights])
+def test_constraint_with_no_variables_is_diagnosed_as_a_conflict_instead_of_crashing(make: Callable[[], m.Instance]) -> None:
+    """リーダー数の制約が定数 False になっても、診断が内部エラー（KeyError）で落ちず、その制約を矛盾の原因として説明する。"""
+    d = m.diagnose(make(), m.Eps(), time_limit=30, mus_time_limit=60)
+    assert d.status == m.CONFLICT and d.code == m.ReturnCode.CONFLICT and d.minimal
+    assert len(d.items) == 1 and d.items[0].group == "skill"                 # 単独で充足不能な1本（どの日・区分でも同じ。最初の1本）
+    assert "リーダー数" in m.explain(d)
+
+
+def test_every_named_expression_is_a_cpmpy_expression_even_when_a_constraint_has_no_variables() -> None:
+    """`Named.expr` は常に CPMpy の式（定数 False は BoolVal に包む）。MUS は式の `id()` で制約を対応づけるので、定数のままだと壊れる。"""
+    from cpmpy.expressions.core import Expression
+    for I in (_inst_no_leader(), _inst_leaders_cannot_work_nights()):
+        flat = [x for items in m.NurseModel(I, m.Eps()).build_named().values() for x in items]
+        assert all(isinstance(x.expr, Expression) for x in flat)
+        consts = [x for x in flat if type(x.expr).__name__ == "BoolVal"]
+        assert len(consts) == 60 and {x.group for x in consts} == {"skill"}  # 30日 × 準夜・深夜
