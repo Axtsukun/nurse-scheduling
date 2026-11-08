@@ -17,7 +17,9 @@ nurse/                  # エンジン本体（依存は下向きのみ）
   law.py / domain.py / optional.py   # 層1 / 層2 / 層3 の制約（ModelKernel を継承したミックスイン）
   model.py              # NurseModel（上の合成）
   solver.py             # solve（SolveResult）・roster
-  diagnosis.py          # 解けないときの診断（時間切れ / 制約矛盾 → MUS を exact で求め、日本語で説明）
+  diagnosis.py          # 解けないときの診断（時間切れ / 制約矛盾 → MUS を別プロセスで求め、日本語で説明）
+  mus_protocol.py       # MUS プロセスとのメッセージ（request・core・response。pickle）の定義と入出力。exact を import しない
+  mus_worker.py         # MUS プロセス（python -m nurse.mus_worker。exact はこのプロセスの中だけで動く）
   synthetic.py          # 合成インスタンス・個別要望の付与
 nurse_csp.py            # 互換の窓口（import nurse_csp as m）と CLI（終了コード = ReturnCode）
 nurse_csv.py            # CSV で入出力する窓口（init=見本作成 / run=読み込み→求解→診断→出力 CSV。Web アプリとの IF）
@@ -54,10 +56,12 @@ tests/
 - **制約の名前（決定事項。仕様は docs/design/constraint-message-spec.md）**：CPMpy は制約式に名前を付けられない。式を `Item`（対象・パラメータ）/ `Aux`（補助変数の定義。hard）で包み、`build_named()` が `Named` にする。`Named` は **ID**（`{群}-{群内連番4桁}`。全制約に付け、同じ入力なら同じ ID。例 `cover-0012`）・群・**クラス名**（日本語・短い）・**メッセージ**を持つ。メッセージは `<対象> <名前>=<値>` で、構造化データから整形器が**診断のときだけ**作る（`build()` は文字列を作らない）。表示行は `{ID}  [{クラス名}] {メッセージ}`（例 `cover-0012  [人数制約下限] 11/03 12:30 - 11/03 13:00 勤務者数=10`）。日付は `Instance.start_date` があれば `MM/DD HH:mm`、なければ `N日目(曜)`。看護師名・区分名は `Instance.nurse_names`・`cat_names`。`build()` は式だけを返す（求解用。式は名前の有無で変わらない）。**`build_named()` は、同じ有効な制約の集合なら最初の結果を再利用する**（`NurseModel` の中にキャッシュ。求解と診断が同じ式・補助変数を共有し、診断は作り直さない。`I`・`eps` は生成後に変えない前提。返す辞書・リストは呼び出しごとの新しい入れ物で、中の `Named` は共有）。
 - **層構成**（`scope`）：`core`（カーネル）／`law`（層1 労働法規）／`domain`（層2 病院・看護職共通）／`optional`（層3 努力義務・要望）。core と law はオフにできない（`selected_constraints` が `InputError`。`ValueError` の一種）。層2・3は `Rules.off` で外す。パラメータは層ごとに `LawParams` / `DomainParams` / `GuidelineParams`、まとめて `Instance.rules`。`layer`（L1〜L5）は式の作り方の分類で、`scope` とは別の軸。
 - **ソルバーの選択（決定事項）**：**求解は CP-SAT**（`solver.SOLVE_SOLVER = "ortools"`）、**MUS の計算は exact**（`diagnosis.MUS_SOLVER = "exact"`）。実測（README 4.5 節）の根拠あり。exact が使えないときは黙って別のソルバーに替えず、エラーにする。`solve(solver=...)` と `diagnose(mus_solver=...)` の引数は実験用で、既定値を変えるときはユーザーに確認する。
-- **診断は別モデル**：通常求解に指示変数を入れない。解けない原因は「時間切れ」と「制約矛盾」の2つ。`diagnose()` はまず通常モデルを CP-SAT で解き、実行不能と確定したときだけ `cpmpy.tools.mus` を **exact**（PBソルバー）で使う。実測（README 4.5 節）では、14条件すべてで CP-SAT の1.2〜3.3倍速い（中央値1.6倍）。`mus` 自体には時間制限が無いので、平均値の制約（72時間ルール）を極端に締めた矛盾などでは戻らなかった。そのため **MUS に時間制限を掛ける**（決定事項: 事前候補取得 + 子プロセスで打ち切り。下記）。
+- **診断は別モデル**：通常求解に指示変数を入れない。解けない原因は「時間切れ」と「制約矛盾」の2つ。`diagnose()` はまず通常モデルを CP-SAT で解き、実行不能と確定したときだけ `cpmpy.tools.mus` を **exact**（PBソルバー）で使う。実測（README 4.5 節）では、14条件すべてで CP-SAT の1.2〜3.3倍速い（中央値1.6倍）。`mus` 自体には時間制限が無いので、平均値の制約（72時間ルール）を極端に締めた矛盾などでは戻らなかった。そのため **MUS に時間制限を掛ける**（決定事項: 事前候補取得 + 別プロセスを止めて打ち切り。下記）。
   - **hard / soft の分け方**（MUS に別々に渡す）: 背景（構造・履歴・補助変数の定義。`relaxable=False` と `Aux`）と前提（カーネル・層1 = `MANDATORY`。固定割当・労基法の休日）が hard、層2・層3（`TOGGLEABLE`）が soft。
   - **手順**: ①前提だけで矛盾するなら、前提の中から MUS（`hard_only=True`: 入力データと法令の矛盾）。②そうでなければ soft の MUS を**一段階**で求め（制約群を単位にした先行の絞り込みは、実測で12/12条件で一段階より遅かったので採用しない）、③その矛盾に関わる前提だけを追加で絞る。
-  - **MUS の時間制限**（`diagnose(mus_time_limit=…)`、MUS 1回ごと。既定は `nurse.properties` の `mus.time_limit`＝30秒）：①`_bounded_mus` が、MUS の前に仮定つきの求解 1 回でコア（事前候補。最小とは限らない）を取る → ②`cpmpy.tools.mus` を fork した子プロセスで実行して打ち切る（式を pickle せず、結果は添字で返す。fork が使えない環境では黙って外さず `SolverUnavailableError`）→ ③打ち切りなら事前候補を返し `Diagnosis.minimal=False`。事前候補も取れなければ items が空（矛盾は確定、原因は特定できず）。
+  - **MUS は別プロセス（決定事項）**：`_mus_in_worker` が `python -m nurse.mus_worker` を新しいインタープリターで起動する（`fork` は使わない）。**exact は MUS プロセスの中だけで動き、診断を呼ぶプロセスは読み込まない**（`tests/test_mus_worker.py` が `sys.modules` で検査。ライセンスの境界と環境の分離の前提）。式は pickle で渡し（hard と soft を **1 つの辞書にして 1 回の `pickle.dump`**。別々に pickle すると共有された変数が複製されて壊れる）、**結果は soft の添字で受け取る**（親は式の `id()` で対応づけない。`id()` の対応づけは MUS プロセスの中に閉じる）。やりとりは、診断が作った一時ディレクトリの 4 ファイル（`request.pkl`・`ready`・`core.pkl`・`response.pkl`）だけ（標準入出力は使わない）。pickle は、作成者だけが読み書きできるそのディレクトリの中だけで読む（信頼できない入力・他の利用者が書ける場所・ネットワークでは使わない）。`python -O` では `assert` が無効になり充足可能を検出できないので、`PYTHONOPTIMIZE` を引き継がず、`-O` で起動されたら ERROR。ソルバーが使えない（exact 未導入など）ときは、黙って別のソルバーに替えず `SolverUnavailableError`（コード 40）。MUS プロセスが結果を返さずに終了したら `InternalError`。
+  - **MUS の時間制限**（`diagnose(mus_time_limit=…)`、MUS 1回ごと。既定は `nurse.properties` の `mus.time_limit`＝30秒）：①MUS プロセスが、MUS の前に仮定つきの求解 1 回でコア（事前候補。最小とは限らない）を取って `core.pkl` に書き出す → ②続けて `cpmpy.tools.mus` で最小にする。診断が、**段階ごとに**時間を数えて、超えたらプロセスを止める（起動と式の復元 `STARTUP_LIMIT`＝120秒 → 事前候補の求解 `mus_time_limit`＋猶予 `CORE_GRACE`＝5秒 → MUS `mus_time_limit`。段階の切り替わりは `ready`・`core.pkl` の出現で知る）→ ③止めたなら事前候補を返し `Diagnosis.minimal=False`。事前候補も取れなければ items が空（矛盾は確定、原因は特定できず）。
+  - **別プロセス化の費用（実測。README 4.5 節）**：MUS を求めるたびに約0.4秒（大半は CPMpy の読み込み。避けられない）、1回の診断で MUS を2回求めるので約0.8〜1.0秒の固定費が増える（`Diagnosis.times["mus_startup"]`）。結果（制約 ID の集合・最小か・リターンコード）は、`fork` 方式と13条件すべてで一致した。所要は、30人の短い診断（5秒未満）で +19〜41%、60人で +7〜21%、90人・時間切れで +1〜2%（絶対値は +0.15〜+2.1秒）。固定費を減らす案として、2 回の MUS で同じプロセスを使い回す方法があるが、プロトコルが複雑になるので未実施（必要になったら検討する）。
   - 結果は `Diagnosis`（status は feasible / timeout / conflict。`items` / `soft_items` / `given_items`）で、`explain()` が日本語で説明する。時間切れでは MUS を求めない（矛盾かどうか不明なため）。
 - **設定とリターンコード（決定事項）**：求解と MUS の時間制限は `nurse.properties`（`solve.time_limit`・`mus.time_limit`、既定は各30秒）に外出しし、`solve()`・`diagnose()` は引数を省略するとこれを使う（`config.load_settings`。呼ぶたびに読み直す）。結果は `ReturnCode`（0 正常 / 10 求解が時間切れ / 20 制約矛盾 / 21 MUS が時間切れ / 22 原因を特定できず / 30 入力・設定の誤り / 40 ソルバー・環境 / 50 内部エラー）で表し、`Diagnosis.code` と CLI の終了コードに使う。入力・設定の誤りは `InputError`（`ValueError` の一種）、環境は `SolverUnavailableError`、内部は `InternalError`（どちらも `RuntimeError` の一種）。新しい例外・状態を足すときは `nurse/codes.py` にコードを足す。
 - **ログ（決定事項）**：標準出力とファイルの**両方**に出し、**親 `nurse`（①プログラム全体）と子 `nurse.engine`（②エンジン求解詳細＝CP-SAT の標準ログ）の2系統**にする。②は既定で①にも流す（`engine.propagate: true`。①の1本で時系列に追える。親へ流れた行は①のレベルで絞られ、標準出力は二重にしない。`false` なら①は処理の流れだけ）。設定は YAML か JSON（`nurse.logging.yaml`。`--log-config` > 環境変数 `NURSE_LOGGING` > リポジトリ直下 > 既定値）。**全行にタイムスタンプ・メソッド（`funcName`）・メッセージを必ず含める**（書式から外すと `InputError`）。ファイルは `RotatingFileHandler`（既定 10MB × 5世代）。モジュールは `logging.getLogger(__name__)` を使い（`print` でログを出さない）、`setup_logging()` はライブラリ側では呼ばない（CLI だけ。呼ばない間は何も出さない）。ソルバーのログは `attach_engine_log`（CP-SAT のパラメータを直接設定。CPMpy の `log_search_progress` は、標準出力の差し替え時にコールバックを `print` に上書きするので使わない）。**ログのメソッド欄は公開の関数名にする**（ヘルパー `_x` の中のログは `stacklevel` で呼び出し元に寄せる。tests/test_logger.py が検査）。標準出力のエンジンログ（既定で出す）は、開発者がデバッグ時に見る用。個別の変数・制約は DEBUG、総数は INFO。ログが無効なとき、数える処理を飛ばして求解を変えない。tests/conftest.py が、テストのログの出力先を一時ディレクトリにする。
@@ -103,7 +107,7 @@ pip install -r requirements.txt
 pytest -q tests/test_preprocess.py     # ソルバー不要：前処理の厳密性
 pytest -q -s tests/test_solve.py       # 求解＋独立検証器（verify.py）
 pytest -q tests/test_layers.py         # 層構成・根拠ID・休日の窓・検査関数の対応（一部は求解する）
-pytest -q                              # 全体（約1分40秒。層2・層3の制約を1つずつ外す求解、MUS の計算を含む）
+pytest -q                              # 全体（約3分。層2・層3の制約を1つずつ外す求解、MUS の計算を含む）
 python nurse_csp.py                    # 合成インスタンスで計測
 ```
 - 解の正しさは必ず `verify.check()`（モデルの式を使わない独立検証器）で確認する。

@@ -8,7 +8,7 @@
 | 21 | `CONFLICT_MUS_TIME_LIMIT` | 制約矛盾: 原因の絞り込みが時間切れ。事前候補を返した（最小でない可能性） |
 | 22 | `CONFLICT_UNIDENTIFIED` | 制約矛盾: 証明済みだが、原因の制約を時間内に特定できなかった |
 | 30 | `INPUT_ERROR` | 入力・設定の誤り（Instance の不整合、nurse.properties の不正など）→ `InputError` |
-| 40 | `SOLVER_UNAVAILABLE` | ソルバーや実行環境が使えない（exact 未導入、fork が使えないなど）→ `SolverUnavailableError` |
+| 40 | `SOLVER_UNAVAILABLE` | ソルバーや実行環境が使えない（exact 未導入など）→ `SolverUnavailableError` |
 | 50 | `INTERNAL_ERROR` | 内部エラー（モデルの不具合、想定外の例外）→ `InternalError` |
 
 （2 は argparse の引数エラー。Python の慣習に従う）
@@ -63,7 +63,7 @@ class InputError(NurseError, ValueError):
 
 
 class SolverUnavailableError(NurseError, RuntimeError):
-    """ソルバーや実行環境が使えない（exact 未導入、fork が使えない環境など）。黙って別の方法に替えない"""
+    """ソルバーや実行環境が使えない（exact 未導入など）。黙って別の方法に替えない"""
     code = ReturnCode.SOLVER_UNAVAILABLE  # 対応するリターンコード
 
 

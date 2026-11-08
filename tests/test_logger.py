@@ -255,8 +255,8 @@ def test_diagnosis_logs_the_process_and_the_mus(tmp_path: pathlib.Path) -> None:
     d = m.diagnose(dc.replace(I, off_days=[I.n_days + 1] + I.off_days[1:]), m.Eps(), time_limit=60)     # 公休が日数を超える矛盾
     assert d.status == m.CONFLICT
     log = _read(tmp_path, "nurse.log")
-    for step in ("診断開始", "通常の求解: ok=False ステータス=UNSATISFIABLE", "制約を分類", "MUS の事前候補（コア）", "MUS（子プロセス）を開始",
-                 "MUS（子プロセス）が時間内に終了", "MUS 終了: 最小", "診断結果: ステータス=conflict コード=CONFLICT(20)"):
+    for step in ("診断開始", "通常の求解: ok=False ステータス=UNSATISFIABLE", "制約を分類", "MUS の事前候補（コア）", "MUS（別プロセス）を開始",
+                 "MUS（別プロセス）の結果: MUS", "MUS 終了: 最小", "診断結果: ステータス=conflict コード=CONFLICT(20)"):
         assert step in log, step
     assert re.search(r"MUS: 1 件（前提 0・soft 1）、最小=True、前提だけの矛盾=False、群=\['offcount'\]", log)    # 結果の MUS
     assert "MUS の要素: offcount-0001" in log                                      # 個別の要素（DEBUG）

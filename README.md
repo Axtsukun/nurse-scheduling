@@ -6,7 +6,7 @@
 |---|---|
 | 解く問題 | 看護師 N 人・T 日の勤務表（休・日勤・準夜・深夜・パート勤務など）。履歴（前月末の勤務）を引き継ぐ |
 | 定式化 | 純PB（決定変数・補助変数はすべて 0/1 の整数変数 `intvar(0, 1)`、整数係数の線形制約）。品質要件は ε 制約で表す |
-| ソルバー | **求解は CP-SAT、MUS（矛盾の説明）は exact**（決定事項。CPMpy 経由）。`exact`・`pysat` は求解でも指定できるが実験用 |
+| ソルバー | **求解は CP-SAT、MUS（矛盾の説明）は exact**（決定事項。CPMpy 経由）。MUS は**別プロセス**で求め、exact は診断を呼ぶプロセスに読み込まれない（4.4 節）。`exact`・`pysat` は求解でも指定できるが実験用 |
 | 検証 | 独立検証器 `verify.py` が、モデルの式を使わずに元の規則で解を検査する |
 | 規模の目安 | 合成データで 30人・31日が約3秒、60人・31日が約20秒（`bench_scale.py` の計測。制約の構成で大きく変わる） |
 
@@ -33,7 +33,7 @@ pip install -r requirements.txt                        # cpmpy, ortools, exact, 
 
 python nurse_csp.py            # 合成インスタンス（30人・30日）を1問求解し、勤務表の先頭を表示
 python evaluate.py             # 求解 → 独立検証 → 評価（人数・勤務回数・72時間・土日・要望）を表示
-pytest -q                      # 全テスト（207件、約3分）
+pytest -q                      # 全テスト（227件、約3分）
 
 python webapp/server.py        # サンプル Web アプリ（http://127.0.0.1:8000/。データ編集・パラメータ編集・実行・結果表示。4.9 節）
 ```
@@ -68,7 +68,9 @@ nurse-scheduling/
 │   ├── optional.py         層3 努力義務・ガイドライン・個別要望の制約
 │   ├── model.py            NurseModel（kernel + law + domain + optional の合成）
 │   ├── solver.py           solve（SolveResult）・roster
-│   ├── diagnosis.py        解けないときの診断（時間切れ / 制約矛盾 → MUS を日本語で説明）
+│   ├── diagnosis.py        解けないときの診断（時間切れ / 制約矛盾 → MUS を日本語で説明。MUS は別プロセスに任せる）
+│   ├── mus_protocol.py     MUS プロセスとのメッセージ（request・core・response）の定義と入出力（exact を import しない）
+│   ├── mus_worker.py       MUS プロセス（`python -m nurse.mus_worker`。exact はこのプロセスの中だけで動く）
 │   └── synthetic.py        合成インスタンス・個別要望の付与
 │
 ├── nurse_csp.py            互換の窓口（`import nurse_csp as m`）と、1問求解の CLI
@@ -97,6 +99,7 @@ nurse-scheduling/
 │   ├── test_docs.py        README の依存表・依存図とクラス図が、コードと一致すること・ドキュメントサイトがビルドできること・API 文書が全モジュールを載せ docstring・型ヒントが揃い読みやすいこと  10件
 │   ├── test_config.py      設定ファイル（properties）とリターンコード・例外・CLI の終了コード  17件
 │   ├── test_diagnose.py    診断（時間切れ / 制約矛盾 / 前提同士の矛盾 / MUS が極小 / MUS の時間制限 / 変数のない制約）  16件
+│   ├── test_mus_worker.py  MUS プロセス（メッセージ・添字での返却・起動・時間制限で止める・`-O` の拒否・診断を呼ぶプロセスが exact を読み込まないこと）  20件
 │   ├── test_evaluate.py    評価の集計が解と整合すること                              3件
 │   ├── test_csv.py         CSV の入出力（見本の往復・入力の誤りの検出・結果 CSV）      38件
 │   └── test_webapp.py      Web アプリのサーバー（CSV の読み書き・実行・履歴・拒否）    4件
@@ -136,7 +139,7 @@ sequenceDiagram
     participant R as registry
     participant C as CP-SAT（ortools）
     participant D as diagnosis.diagnose
-    participant X as exact（MUS）
+    participant X as MUS プロセス（別プロセス。exact）
     participant V as verify
     participant E as evaluate
 
@@ -167,8 +170,11 @@ sequenceDiagram
         else 解なしと確定
             D->>C: 前提（カーネル・層1）だけの充足判定
             C-->>D: 充足 / 矛盾
-            D->>X: 事前候補（コア）→ mus（時間制限つき）
-            X-->>D: MUS（最小でない場合あり）
+            D->>X: 起動（request: hard・soft の式を pickle で渡す）
+            activate X
+            X-->>D: 事前候補（コア。soft の添字）
+            X-->>D: MUS（soft の添字。時間切れなら診断が止める）
+            deactivate X
             D-->>U: Diagnosis（conflict）
         end
         deactivate D
@@ -185,16 +191,16 @@ sequenceDiagram
 | `registry` | `nurse/registry.py` | `Rules.off`・`enabled` を反映して、有効な制約名を選ぶ |
 | CP-SAT | OR-Tools（CPMpy 経由） | 求解と、充足判定 |
 | `diagnosis.diagnose` | `nurse/diagnosis.py` | 解けない原因を「時間切れ」と「制約矛盾」に分け、矛盾なら MUS を求める |
-| exact | PB ソルバー exact（CPMpy 経由） | 矛盾の原因（MUS）の計算 |
+| MUS プロセス | `nurse/mus_worker.py`（別プロセス。PB ソルバー exact を CPMpy 経由で使う） | 矛盾の原因（MUS）の計算。診断が起動し、式を pickle で渡し、soft の添字を受け取る（`nurse/mus_protocol.py`） |
 | `verify` / `evaluate` | `verify.py` / `evaluate.py` | 解の独立検査 / 解の集計 |
 
 図の番号に沿った流れ:
 
 - **1〜8 求解**: `solve` が `NurseModel` を作り（2）、`registry` が有効な制約を選ぶ（3〜4）。制約名ごとの式の辞書（5）を CP-SAT に渡して解き（6〜7）、`SolveResult(ok, status, model, times, counts)` を返す（8）。計時は `build`（式の生成）・`transform`（CPMpy からソルバーへの変換）・`solve`（求解）の3つに分けて `times` に入る。
 - **9〜14 解あり（`ok = True`）**: モデルから割当表 `A[n][d]`（勤務の添字）を取り出し（9〜10）、独立検証器で検査する（11〜12。モデルの式を使わず、元の規則から直接数える）。続けて評価（集計）を行う（13〜14）。
-- **15〜23 解なし・時間切れ（`ok = False`）**: `diagnose` は `solve` をもう一度呼ぶ（16〜17。通常求解の結果は再利用しない）。
+- **15〜24 解なし・時間切れ（`ok = False`）**: `diagnose` は `solve` をもう一度呼ぶ（16〜17。通常求解の結果は再利用しない）。
   - 時間切れなら、矛盾かどうかは不明なので MUS を求めず `Diagnosis(timeout)` を返す（18）。前提だけの充足判定（19）が時間切れになった場合も、同じく `Diagnosis(timeout)` を返す（図では省略）。
-  - 解なしと確定したら、前提（カーネル・層1）だけの充足判定を行い（19〜20）、矛盾の原因（MUS）を求める（21〜22）。MUS は2回求める（まず外せる制約（層2・層3）の MUS、次にその矛盾に関わる前提の絞り込み）。いずれも、まず仮定つきの求解で事前候補（コア）を取り、`mus` を時間制限つきで実行する。時間内に終われば最小、打ち切れば事前候補を返す（`minimal=False`）。結果は `Diagnosis(conflict)`（23）で、`explain()` が日本語で説明する。
+  - 解なしと確定したら、前提（カーネル・層1）だけの充足判定を行い（19〜20）、矛盾の原因（MUS）を求める（21〜23）。MUS は2回求める（まず外せる制約（層2・層3）の MUS、次にその矛盾に関わる前提の絞り込み）。いずれも、**別プロセス**（MUS プロセス）を起動して任せる（21）。このプロセスが、まず仮定つきの求解で事前候補（コア）を取って書き出し（22）、続けて `mus` で最小にする（23）。時間内に終われば最小、診断が時間制限でプロセスを止めたら事前候補を返す（`minimal=False`）。結果は `Diagnosis(conflict)`（24）で、`explain()` が日本語で説明する。
 - **図で省いたこと**: 前提だけで矛盾する場合（`hard_only`）は、MUS を前提の中から求める。この分岐は図に描いていない。時間制限（`time_limit`・`mus_time_limit`）の既定値は `nurse.properties` から読む（4.6 節）。
 - **記法**: 実線の矢印は呼び出し、破線の矢印は戻り値、`alt` は条件分岐、縦長の箱は実行中（活性区間）を表す。
 
@@ -265,6 +271,8 @@ flowchart TB
         logger["«module»<br/>logger"]
         instance["«module»<br/>instance"]
         codes["«module»<br/>codes"]
+        mus_protocol["«module»<br/>mus_protocol"]
+        mus_worker["«module»<br/>mus_worker"]
     end
     nurse_csp -.-> NURSE
     evaluate -.-> NURSE
@@ -272,6 +280,8 @@ flowchart TB
     others -.-> NURSE
     evaluate -.-> verify
     diagnosis -.-> solver
+    diagnosis -.-> mus_protocol
+    mus_worker -.-> mus_protocol
     solver -.-> model
     solver -.-> config
     solver -.-> logger
@@ -300,7 +310,7 @@ Mermaid には UML のパッケージ図がないので、flowchart で UML の�
 **② 説明**
 
 - **依存は下向きのみ**。循環はない。「段」の番号は、そのモジュールが依存する先をたどった最長の長さで、番号の大きいモジュールが小さいモジュールを使う（3.2 節の「層1〜3」＝制約の層とは別のもの）。循環がないことと、下の表が実際の `import` と一致することは、`tests/test_docs.py` が検査する。
-- **図の矢印は、推移的に含まれる依存を省いている**（例: `law` は `registry` も直接 `import` するが、`kernel` 経由で到達できるので描かない）。省かない完全な直接依存は、下の表のとおり（`nurse` 内の依存は39本。図には、このうち20本を描いている）。
+- **図の矢印は、推移的に含まれる依存を省いている**（例: `law` は `registry` も直接 `import` するが、`kernel` 経由で到達できるので描かない）。省かない完全な直接依存は、下の表のとおり（`nurse` 内の依存は45本。図には、このうち24本を描いている）。
 - `nurse_csp.py`・`verify.py`・`evaluate.py`・`bench_*.py`・テストは `nurse` パッケージ全体に依存する（`evaluate.py` は `verify.py` も使う）。
 - `nurse/__init__.py` は、公開 API を再エクスポートするため全モジュールに依存する。図と表からは省いている。
 - 外部ライブラリは、表の最後の列のとおり。CPMpy は制約を作るモジュール（`kernel`・`law`・`domain`・`optional`）と、求解・診断（`solver`・`diagnosis`）が使う。
@@ -308,9 +318,11 @@ Mermaid には UML のパッケージ図がないので、flowchart で UML の�
 | 段 | モジュール | 役割 | 直接の依存（`nurse` 内） | 外部ライブラリ |
 |---|---|---|---|---|
 | 0 | `codes` | リターンコード `ReturnCode` と例外（`InputError` など） | — | — |
+| 0 | `mus_protocol` | MUS プロセスとのメッセージ（request・core・response）の定義と入出力。exact を import しない | — | cpmpy |
 | 1 | `config` | 設定ファイル `nurse.properties` の読み込み（`Settings`） | `codes` | — |
 | 1 | `instance` | 入力データ `Instance`・層ごとのパラメータ・`Eps` | `codes` | numpy |
 | 1 | `logger` | ログの設定（標準出力とファイル。親 `nurse`・子 `nurse.engine` の2系統。4.8 節） | `codes` | yaml |
+| 1 | `mus_worker` | MUS プロセス（`python -m nurse.mus_worker`）。exact はこのプロセスの中だけで動く | `mus_protocol` | cpmpy |
 | 2 | `message` | 制約メッセージの部品と整形器 `Renderer` | `instance` | — |
 | 2 | `preprocess` | 時刻データから係数・集合・窓を作る純Python | `codes`, `instance` | — |
 | 2 | `solution` | 解（割当表）の読み取り部品 | `instance` | — |
@@ -322,7 +334,7 @@ Mermaid には UML のパッケージ図がないので、flowchart で UML の�
 | 5 | `optional` | 層3 努力義務・要望の制約（`OptionalConstraints`） | `instance`, `kernel`, `message`, `preprocess`, `registry` | cpmpy |
 | 6 | `model` | `NurseModel`（上の3つの合成） | `domain`, `law`, `optional` | — |
 | 7 | `solver` | `solve`・`SolveResult`・`roster` | `config`, `instance`, `logger`, `model` | cpmpy, numpy |
-| 8 | `diagnosis` | 解けないときの診断（`diagnose`・`Diagnosis`） | `codes`, `config`, `instance`, `logger`, `registry`, `solver` | cpmpy |
+| 8 | `diagnosis` | 解けないときの診断（`diagnose`・`Diagnosis`）。MUS は別プロセスに任せる | `codes`, `config`, `instance`, `logger`, `mus_protocol`, `registry`, `solver` | cpmpy |
 
 ### 3.5 クラス図（コア部分）
 
@@ -432,8 +444,10 @@ d.hard_only                            # True なら前提同士（入力デー�
 
 MUS の求め方:
 - `cpmpy.tools.mus` を PB ソルバー **exact** で使う（決定事項。CP-SAT より速い。4.5 節）。exact が使えないときは、黙って別のソルバーに替えず、導入方法つきのエラー（`pip install exact`）にする。
+- **別プロセスで求める**（決定事項。`nurse/mus_worker.py`）: 診断が `python -m nurse.mus_worker` を起動し、式を pickle で渡し（hard と soft を 1 つのオブジェクトにまとめて、共有された変数の同一性を保つ）、結果を **soft の添字**で受け取る。exact は、そのプロセスの中だけで動き、診断を呼ぶプロセスは読み込まない。`fork` を使わないので Windows や macOS でも動く。やりとりは、診断が作った一時ディレクトリ（作成者だけが読み書きできる）の中のファイルだけで、`python -O`（`assert` が無効になり、充足可能を検出できなくなる）では動かさない。メッセージの仕様は `nurse/mus_protocol.py`。
+- **時間制限は段階ごと**（診断がプロセスを止める）: 起動と式の復元（上限120秒）→ 事前候補の求解（`mus_time_limit` + 猶予5秒）→ MUS（`mus_time_limit`）。時間は、プロセスが `ready`・`core.pkl` を書いた時点から数える。事前候補は、MUS プロセスが MUS の前に書き出すので、MUS を止めても使える。
 - 手順: ①前提だけで矛盾するか調べる（矛盾するなら前提の中から MUS）。②そうでなければ soft の MUS を**一段階**で求める（hard は仮定を持たず別に渡す）。③その矛盾に関わる前提だけを追加で絞る。
-- CPMpy は制約式に名前を付けられないので、制約メソッドが式を `Item(式, 対象, パラメータ)` や `Aux(補助変数の定義式)` で包んで返し、`build_named()` が `Named` に正規化する。MUS が返す式を、式の同一性で引き戻して名前を得る。`build_named()` は、**同じ有効な制約の集合なら最初の結果を再利用する**（求解と診断が同じ式・補助変数を共有し、診断は作り直さない。診断の前処理が約0.3〜0.5秒 → 約0.01秒）。
+- CPMpy は制約式に名前を付けられないので、制約メソッドが式を `Item(式, 対象, パラメータ)` や `Aux(補助変数の定義式)` で包んで返し、`build_named()` が `Named` に正規化する。MUS プロセスが返す soft の添字で `Named` を引き戻して、名前を得る。`build_named()` は、**同じ有効な制約の集合なら最初の結果を再利用する**（求解と診断が同じ式・補助変数を共有し、診断は作り直さない。診断の前処理が約0.3〜0.5秒 → 約0.01秒）。
 
 **制約の名前（ID・クラス・メッセージ）**（仕様: `docs/design/constraint-message-spec.md`）
 
@@ -467,6 +481,31 @@ MUS の求め方:
 - **比較から除外した条件**: 72時間ルールの上限を極端に下げた矛盾（平均夜勤20時間以下）。この制約を外さない限り、他のどの制約を外しても実行不能のままなので、MUS の絞り込みが全探索に近くなり、exact でも終わらなかった（比較に不向きな条件設定）。平均値の制約は求解でも重い（72時間ルールを外すと求解が約6分の1）。現実的な上限での挙動は未測定。
 - 人数制約のメッセージは、実際に効いている基本区間（勤務の境で区切った小区間）と勤務者数で表す（需要区間は出さない）。基本区間は統合しない（制約の区間と表示が常に一致する）。`Instance.demand` は番ごとに一定で、各日を空きなく覆う（生成時に検査）。
 
+**MUS の別プロセス化（現行）と、`fork` の子プロセス（旧）の比較**（`diagnose()` の全体の所要。合成データ、seed 0、30日、常勤:パート = 26:4、`mus_time_limit` は 120秒（時間切れの2条件のみ30秒）、4コアで逐次実行。記載のない限り各3回の中央値。旧は #23 時点の `develop`）:
+
+| シナリオ（MUS の件数） | 人数 | 旧 `fork`[秒] | 現行 別プロセス[秒] | 差[秒] | 差の割合 |
+|---|---|---|---|---|---|
+| A 公休数が日数を超える（1件） | 30 | 4.08 | 5.19 | +1.11 | +27% |
+| C 固定割当の連続 × 連続勤務（7件） | 30 | 4.15 | 5.47 | +1.32 | +32% |
+| D 固定割当の連続 × 週1休（8件。前提同士） | 30 | 1.23 | 1.73 | +0.50 | +41% |
+| 常勤の前月末が5連続の日勤（11件） | 30 | 4.20 | 5.40 | +1.20 | +29% |
+| 夜勤リーダーの資格者が0人（1件） | 30 | 4.12 | 4.90 | +0.78 | +19% |
+| A | 60 | 10.10（再測定5回: 11.46） | 12.18（再測定5回: 12.27） | +2.08（再測定 +0.81） | +21%（再測定 +7%） |
+| C | 60 | 10.82 | 11.61 | +0.79 | +7% |
+| D | 60 | 2.61 | 2.88 | +0.27 | +10% |
+| 常勤の前月末が5連続の日勤（21件） | 60 | 11.70 | 13.04 | +1.34 | +11% |
+| 夜勤リーダーの資格者が0人 | 60 | 10.66 | 11.77 | +1.11 | +10% |
+| A（1回） | 90 | 21.59 | 21.74 | +0.15 | +1% |
+| 深夜帯の需要を全日9人（MUS が時間切れ。2回） | 30 | 36.59 | 37.02 | +0.43 | +1% |
+| 準夜帯の需要を全日9人（MUS が時間切れ。2回） | 30 | 34.78 | 35.44 | +0.66 | +2% |
+
+- **結果は、13条件すべてで一致した**（矛盾の制約 ID の集合、最小かどうか、リターンコード）。時間切れの2条件も、打ち切りの挙動（深夜帯は事前候補 115件を返して最小でない、準夜帯は事前候補も取れず原因を特定できない）が同じ。
+- **遅くなる分は、ほぼ固定費**: MUS を求めるたびに、プロセスの起動と式の復元で約0.4秒（`Diagnosis.times["mus_startup"]` は2回の合計で0.4〜1.0秒）。内訳は、Python の起動が0.02秒、CPMpy の読み込みが約0.4〜0.5秒、`nurse` の読み込みが+0.04〜0.08秒、式の書き出しと復元が各0.03秒（30人、1.2MB）。**CPMpy の読み込みが大半で、別プロセスにする限り避けられない**。
+- **相対的な差は、診断が短いほど大きい**（5秒未満で +19〜41%、60人で +7〜21%、90人と時間切れで +1〜2%）。絶対値では、どの条件も +0.15〜+2.1秒。
+- **計測のばらつき**: 同じ条件でも、時期によって±1秒程度動く（60人の A は、旧が 10.1秒 → 11.5秒）。表の差のうち、1秒を下回るものは、ばらつきの範囲に入る。
+- **メモリ**（最大 RSS、30人の A）: 診断を呼ぶ側は 188MB → 137MB、MUS を求める側は 191MB → 224MB。`fork` は親のメモリを子が引き継ぐが、別プロセスは必要なものだけを読み込む。
+- **exact の分離**: 診断を呼ぶプロセスの `sys.modules` に exact が入らないことを、テストで確認している（`tests/test_mus_worker.py`）。
+
 **旧い方式（二段階: 制約群 → 個別。hard は構造・履歴・補助変数のみ）での参考値**（現行の表ではない）:
 - **二段階と一段階の比較**（exact、各2回）: 一段階が二段階以下だったのは 12/12 条件（0.58〜0.95倍。例: 30人の F は 3.2秒 → 2.3秒、60人の C は 13.2秒 → 8.2秒）。二段階に優位性は見つからなかったので、現行は一段階。
 - **旧い二段階では、B の CP-SAT は群単位の MUS が300秒でも終わらなかった**が、現行の一段階では 4.1秒（30人）で終わる。CP-SAT の性能ではなく、二段階の「群を論理積にした単位」の定式化に起因していたとみられる（切り分けは未実施）。
@@ -499,7 +538,7 @@ MUS の求め方:
 | 21 | `CONFLICT_MUS_TIME_LIMIT` | 制約矛盾（原因の絞り込みが時間切れ。事前候補を返した。最小でない可能性） | 時間打ち切り |
 | 22 | `CONFLICT_UNIDENTIFIED` | 制約矛盾（証明済み。原因を時間内に特定できなかった） | 時間打ち切り |
 | 30 | `INPUT_ERROR` | 入力・設定の誤り（`InputError`。`ValueError` の一種） | 異常 |
-| 40 | `SOLVER_UNAVAILABLE` | ソルバー・実行環境が使えない（`SolverUnavailableError`。`RuntimeError` の一種。exact 未導入、fork が使えない） | 異常 |
+| 40 | `SOLVER_UNAVAILABLE` | ソルバー・実行環境が使えない（`SolverUnavailableError`。`RuntimeError` の一種。exact 未導入） | 異常 |
 | 50 | `INTERNAL_ERROR` | 内部エラー（`InternalError`。モデルの不具合、想定外の例外） | 異常 |
 | 2 | （argparse） | CLI の引数の誤り。Python の慣習に従う | 異常 |
 
@@ -562,7 +601,7 @@ from nurse import setup_logging
 setup_logging("my.logging.yaml")     # 省略すると、上の順に探す
 ```
 
-- **限界**: ②に出るのは CP-SAT（求解と、診断の最初の求解）のログ。MUS を求める **exact**（子プロセス）の内部ログは出さず、①に MUS の開始・終了・件数・最小かを残す。
+- **限界**: ②に出るのは CP-SAT（求解と、診断の最初の求解）のログ。MUS を求める **MUS プロセス**（別プロセス。exact）の内部ログは出さず、①に MUS の開始・終了・件数・最小かを残す。
 - **CPMpy の挙動への対処**: CPMpy は、標準出力が差し替えられているとき（pytest・IPython・リダイレクト）、`solve(log_search_progress=True)` のログのコールバックを `print` に上書きする。そのため CP-SAT のパラメータを直接設定して、②へ取り込んでいる。
 - **用語**: *ロガー* = ログを出す名前つきの窓口（親子関係を持つ）。*ハンドラ* = ログの出力先（標準出力・ファイル）。*ローテーション* = ファイルが大きくなったら、古いログを番号つきの別ファイルへ退避して、新しく書き始めること。
 
@@ -669,7 +708,7 @@ python webapp/server.py [--port 8000] [--workspace 作業ディレクトリ]    
 - **有給休暇の日数は利用者が管理する**（決定）。システムは、入力された取得日だけを固定割当（hard）として受け取る。付与日数・比例付与・年5日の取得は検査しない。
 - **制約は1定義＝1メソッド**で、副作用なし。
 - **型ヒントは必須**。製品コード・ツール・テストの全関数で、`self` / `cls` 以外のすべての引数と戻り値に型を付ける（入れ子の関数も。`lambda` を除く）。制約メソッドの戻り値は `Constraints`（`nurse/registry.py`）。`tests/test_docs.py` が検査する。型の整合性は `mypy` で確かめられる（検査には使っていない。製品コードの指摘は0件。9 章）。
-- **診断は別モデル**。通常の求解に指示変数を入れない。
+- **診断は別モデル**。通常の求解に指示変数を入れない。MUS は別プロセスで求める（診断を呼ぶプロセスは exact を読み込まない）。
 - **週パターンの列挙は採用しない**（規模が約100倍になり、CSP ではLP緩和の利点が活きない）。
 
 ---
@@ -684,7 +723,9 @@ python webapp/server.py [--port 8000] [--workspace 作業ディレクトリ]    
 - **休日の「暦日」の厳密解釈は未確認です**。`holiday_strict_calendar=True`（前日の勤務が日をまたぐ休を数えない）の解釈は、一次資料で確認していない。
 - **法令・基準は一次資料で確認していません**。`docs/legal/` の確度（high / medium / low）を見ること。診療報酬の2026年度改定後の基準も未確認。
 - **対称性の整列（`sym_break`）は実験用です**。`relaxed` は解を取りこぼす可能性があり、合成データでは効果がなく悪化した。
-- **MUS には時間制限があります**（`diagnose(mus_time_limit=…)`。既定は `nurse.properties` の `mus.time_limit`＝30秒。soft の MUS と前提の MUS にそれぞれ適用。4.6 節）。`cpmpy.tools.mus` 自体は時間制限を受け付けないので、①MUS の前に仮定つきの求解 1 回で矛盾の集合（事前候補。最小とは限らない）を取り、②`mus` を子プロセス（fork）で実行して打ち切り、③打ち切ったら事前候補を返す（`Diagnosis.minimal=False`、説明に「最小でない可能性」と出る）。事前候補も時間内に取れなければ、矛盾は確定しているが原因は特定できない（items が空）。通常の矛盾は 1〜12秒（60人）で最小まで終わるが、**平均値の制約（72時間ルール）を極端に締めた矛盾は終わらない**（4.5 節）。この条件（30人、72時間ルールを20時間以下）で `mus_time_limit=5` にすると、10秒で戻り、事前候補 65件が返る（打ち切らずに絞り込みを続けた実験では、0.7秒で 39件、200秒で 36件まで減ったが最小は未確認）。
+- **MUS には時間制限があります**（`diagnose(mus_time_limit=…)`。既定は `nurse.properties` の `mus.time_limit`＝30秒。soft の MUS と前提の MUS にそれぞれ適用。4.6 節）。`cpmpy.tools.mus` 自体は時間制限を受け付けないので、①MUS プロセスが MUS の前に仮定つきの求解 1 回で矛盾の集合（事前候補。最小とは限らない）を取って書き出し、②`mus` を続け、診断が時間制限でプロセスを止め、③止めたら事前候補を返す（`Diagnosis.minimal=False`、説明に「最小でない可能性」と出る）。事前候補も時間内に取れなければ、矛盾は確定しているが原因は特定できない（items が空）。通常の矛盾は 1〜12秒（60人）で最小まで終わるが、**平均値の制約（72時間ルール）を極端に締めた矛盾は終わらない**（4.5 節）。この条件（30人、72時間ルールを20時間以下）で `mus_time_limit=5` にすると、10秒で戻り、事前候補 65件が返る（打ち切らずに絞り込みを続けた実験では、0.7秒で 39件、200秒で 36件まで減ったが最小は未確認）。
+- **MUS の起動費**: MUS を求めるたびに、プロセスの起動と式の復元で約0.4秒かかる（大半は CPMpy の読み込み。30人で、式の書き出しと復元は各0.03秒）。1回の診断で MUS を2回求めるので、約0.8〜1.0秒の固定費が増える（4.5 節の比較）。
+- **pickle は信頼できる入力だけを読む前提です**。MUS プロセスとのやりとりは、診断が作った一時ディレクトリの中だけで行う。他の利用者が書ける場所や、ネットワーク越しには使わない。
 - **MUS は一意ではありません**。矛盾する制約の組が複数あるとき、返すのはそのうちの1つ。1つを直して再診断すると、別の矛盾が見つかることがある。
 - 計画の外にはみ出す端の週（31日の計画の最後の3日など）には、休日の制約をかけられない。
 
@@ -708,6 +749,8 @@ python webapp/server.py [--port 8000] [--workspace 作業ディレクトリ]    
 | 独立検証器 | モデルの式を使わず、元の規則で解を直接検査するコード（`verify.py`） |
 | MUS | 極小充足不能部分集合。同時には成り立たない制約の集合で、どれか1つを外すと残りは矛盾しなくなる。矛盾の原因の説明に使う |
 | exact | 整数係数の線形制約（PB）を解く PB ソルバー。assumptions と UNSAT コアに対応し、MUS の計算に使う |
+| MUS プロセス | MUS の計算だけを行う別プロセス（`nurse/mus_worker.py`）。診断が起動し、式を pickle で渡し、soft の添字を受け取る。exact はこのプロセスの中だけで動く |
+| pickle | Python のオブジェクトをバイト列にして保存・受け渡しする仕組み。任意のコードを実行しうるので、信頼できないデータは読み込まない（MUS プロセスとのやりとりは、診断が作った一時ディレクトリの中だけ） |
 | soft / hard | MUS の計算で、説明の候補にする制約（soft）と、常に成り立たせる制約（hard） |
 | ミックスイン | 機能の一部を別クラスに切り出し、多重継承で組み合わせる書き方 |
 

@@ -188,6 +188,8 @@ def _mus_in_worker(soft: list[Expression], hard: list[Expression], solver: str, 
             if not (work / RESPONSE_FILE).exists():
                 raise InternalError(f"MUS のプロセスが結果を返さずに終了した（終了コード {proc.returncode}）")
             resp = read_message(work / RESPONSE_FILE, RESPONSE_KEYS, "response")
+            if (work / CORE_FILE).exists():
+                log.info("MUS の事前候補（コア）: %d 件", len(read_message(work / CORE_FILE, CORE_KEYS, "core")["core_indices"]), stacklevel=4)
         except ProtocolError as e:
             raise InternalError(f"MUS のプロセスの応答が不正: {e}") from None
     status, t = resp["status"], resp["timings"]
