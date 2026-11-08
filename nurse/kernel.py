@@ -38,7 +38,7 @@ class ModelKernel:
 
     識別子:
 
-    - `self.xv[n]` … 看護師 n の boolvar 配列。shape=(H+T, |D_n|)
+    - `self.xv[n]` … 看護師 n の 0/1 の intvar 配列。shape=(H+T, |D_n|)
     - `self.col[n][s]` … 値 s の列番号
     - `self.dom[n]` … D_n（昇順リスト）
     - `self.active` … `build()` で有効になった制約名（他の制約の前提を確かめるために使う）"""
@@ -61,7 +61,7 @@ class ModelKernel:
             Dn = sorted(set(I.domain[n]) | {int(v) for v in I.history[n]} | fixed_values.get(n, set()))
             self.dom.append(Dn)
             self.col.append({s: j for j, s in enumerate(Dn)})
-            self.xv.append(cp.boolvar(shape=(self.H + self.T, len(Dn)), name=f"x{n}"))
+            self.xv.append(cp.intvar(0, 1, shape=(self.H + self.T, len(Dn)), name=f"x{n}"))
             log.debug("決定変数 x%d: 形 %s（取れる値 %d 個）", n, self.xv[n].shape, len(Dn))
         log.info("決定変数 x を宣言: 看護師 %d 人 × 時点 %d（履歴 %d + 計画 %d）、変数の総数 %d",
                  I.n_nurses, self.H + self.T, self.H, self.T, sum(v.size for v in self.xv))
