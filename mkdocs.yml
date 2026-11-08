@@ -47,6 +47,8 @@ nav:
       - nurse.codes: api/nurse.codes.md
       - nurse.config: api/nurse.config.md
       - nurse.diagnosis: api/nurse.diagnosis.md
+      - nurse.mus_protocol: api/nurse.mus_protocol.md
+      - nurse.mus_worker: api/nurse.mus_worker.md
       - nurse.domain: api/nurse.domain.md
       - nurse.instance: api/nurse.instance.md
       - nurse.kernel: api/nurse.kernel.md

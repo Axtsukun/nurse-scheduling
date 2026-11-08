@@ -391,8 +391,22 @@ classDiagram
         +diagnose(I, eps, time_limit, mus_solver, mus_time_limit) Diagnosis
         +explain(d) str
         -_check(exprs, time_limit) str
-        -_bounded_mus(soft, hard, solver, budget)
-        -_mus_in_child(soft, hard, solver, budget)
+        -_mus_in_worker(soft, hard, solver, budget)
+        -_wait_worker(proc, work, t0, budget) bool
+    }
+    class mus_protocol {
+        <<module>>
+        +PROTOCOL_VERSION int
+        +make_request(hard, soft, solver, time_limit) dict
+        +make_core(core_indices, elapsed_sec) dict
+        +make_response(status, mus_indices, timings, message) dict
+        +write_message(path, message)
+        +read_message(path, keys, what) dict
+    }
+    class mus_worker {
+        <<module>>
+        +solve_request(req, on_core) dict
+        +main(argv) int
     }
     class Diagnosis {
         <<dataclass>>
@@ -432,7 +446,10 @@ classDiagram
     SolveResult o-- NurseModel : model
     diagnosis ..> solver : solve
     diagnosis ..> CPSAT : 充足判定
-    diagnosis ..> Exact : 事前候補と MUS
+    diagnosis ..> mus_protocol : request を書く・response を読む
+    diagnosis ..> mus_worker : 別プロセスとして起動
+    mus_worker ..> mus_protocol : メッセージの入出力
+    mus_worker ..> Exact : 事前候補と MUS
     diagnosis ..> Settings : 既定の時間制限
     diagnosis ..> Diagnosis : 返す
     Diagnosis "1" o-- "0..*" Named : items
@@ -440,7 +457,7 @@ classDiagram
 ```
 
 - **`solver.solve`** は、`NurseModel` を作って式を生成し、CP-SAT（外部）で解き、`SolveResult` を返す。`SolveResult.model` は、解の読み出しに使う `NurseModel`。時間制限の既定値は `Settings`（`nurse.properties`）から読む。
-- **`diagnosis.diagnose`** は、`solve` を呼び、解けなければ原因（時間切れ / 制約矛盾）を調べる。矛盾なら、事前候補（コア）と MUS を exact（外部）で、時間制限つきで求める（`_bounded_mus`・`_mus_in_child`）。結果は `Diagnosis`。
+- **`diagnosis.diagnose`** は、`solve` を呼び、解けなければ原因（時間切れ / 制約矛盾）を調べる。矛盾なら、事前候補（コア）と MUS の計算を**別プロセス**（`mus_worker`。exact はそのプロセスの中だけで動く）に任せ、時間制限を超えたらプロセスを止める（`_mus_in_worker`・`_wait_worker`）。式は pickle で渡し、結果は soft の添字で受け取る（`mus_protocol`）。結果は `Diagnosis`。
 - **`Diagnosis`** は、`items`（矛盾の原因の `Named`）、`minimal`（最小か。時間制限で打ち切ると `False`）、`code`（`ReturnCode`）を持つ。`explain()` が日本語で説明する。
 
 ## 図5 IF（入口・設定・戻り値）
