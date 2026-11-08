@@ -117,12 +117,12 @@ class DomainConstraints(ModelKernel):
                     if (v := self.x(n, self.t(d), s)) is not None])
         if LB >= theta:
             return h, 1
-        z = cp.boolvar(name=f"z_{n}")
+        z = cp.intvar(0, 1, name=f"z_{n}")
         out += [Aux(h >= theta * z), Aux(h <= theta - 1 + (UB - theta + 1) * z)]
         ys = []
         for d in range(T):
             for s in S:
-                y = cp.boolvar(name=f"y_{n}_{d}_{s}")
+                y = cp.intvar(0, 1, name=f"y_{n}_{d}_{s}")
                 out.append(Aux(y >= self.x(n, self.t(d), s) + z - 1))
                 ys.append(u[s] * y)
         return cp.sum(ys), z

@@ -51,6 +51,6 @@ class LawConstraints(ModelKernel):
         prev = self.xs(n, t - 1, overnight_shifts(self.I))
         if not prev:
             return off
-        hol = cp.boolvar(name=f"hol_{n}_{t}")
+        hol = cp.intvar(0, 1, name=f"hol_{n}_{t}")
         side_constraints.extend([Aux(hol <= off), Aux(hol <= 1 - cp.sum(prev))])
         return hol
