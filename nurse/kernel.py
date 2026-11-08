@@ -19,6 +19,20 @@ from .registry import REGISTRY, ConstraintSpec, Item, Aux, Named, Constraints, C
 log = logging.getLogger(__name__)
 
 
+def _as_expression(c: object) -> Expression:
+    """制約を、必ず CPMpy の式にする。`cp.sum([]) >= 1` のように、変数が1つもない比較は、CPMpy の式ではなく
+    Python の定数（`True` / `False`）になる（例: 夜勤リーダーの資格者の中に、その区分の勤務を取れる人がいない）。
+    定数のままだと、MUS の `toplevel_list` が別のオブジェクト（`BoolVal`）に作り替えて、制約との対応づけ（`id()`）が壊れ、
+    矛盾の診断が落ちる。`BoolVal` に包めば、定数の `False` も、ほかの制約と同じ1本の制約として MUS に現れる。
+
+    Args:
+        c: 制約メソッドが返した式（または Python の真偽値）。
+
+    Returns:
+        CPMpy の式。式はそのまま、Python の真偽値は `BoolVal` に包んで返す。"""
+    return c if isinstance(c, Expression) else cp.BoolVal(bool(c))
+
+
 class ModelKernel:
     """決定変数 `x[n,t,s]`（s ∈ D_n のみ生成する疎な形）を保持する。D_n = S_n ∪ {固定割当・履歴に現れる値}。
 
@@ -230,10 +244,10 @@ class ModelKernel:
             正規化した `Named`（ID・制約クラス・式・hard か・対象・パラメータ）。"""
         ident = f"{spec.name}-{i + 1:04d}"
         if isinstance(c, Aux):
-            return Named(ident, spec.name, spec.title, c.expr, True, ctx=self.I)
+            return Named(ident, spec.name, spec.title, _as_expression(c.expr), True, ctx=self.I)
         if isinstance(c, Item):
-            return Named(ident, spec.name, spec.title, c.expr, not spec.relaxable, c.target, c.params, self.I)
-        return Named(ident, spec.name, spec.title, c, not spec.relaxable, ctx=self.I)
+            return Named(ident, spec.name, spec.title, _as_expression(c.expr), not spec.relaxable, c.target, c.params, self.I)
+        return Named(ident, spec.name, spec.title, _as_expression(c), not spec.relaxable, ctx=self.I)
 
     def build(self, enabled: set[str] | None = None) -> dict[str, list]:
         """有効な制約を {制約名: 式のリスト} で返す（求解用）

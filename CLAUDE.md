@@ -35,7 +35,7 @@ tests/
 ```
 
 ## 制約の足し方
-1. 該当する層のモジュール（`law.py` / `domain.py` / `optional.py`）に、`@constraint(名前, layer, relaxable, scope, source, title)` を付けたメソッドを書く。`list[Expression | Item | Aux]` を返し、補助変数はその中で作る。個別の規則は `Item(式, 対象, パラメータ)`（文字列は組み立てない。`message.py` の部品 `Nurse`・`Day`・`DaySpan`・`Span`・`Cat`・`Shift`・`Clock` と `Param` を使う）、補助変数の定義式は `Aux(式)` で包む。`title` は短い制約クラス名（片側の群は方向を含む。例: `人数制約下限`）。全 soft 制約がメッセージを持つことは tests/test_named.py が検査する。
+1. 該当する層のモジュール（`law.py` / `domain.py` / `optional.py`）に、`@constraint(名前, layer, relaxable, scope, source, title)` を付けたメソッドを書く。`list[Expression | Item | Aux]` を返し、補助変数はその中で作る。個別の規則は `Item(式, 対象, パラメータ)`（文字列は組み立てない。`message.py` の部品 `Nurse`・`Day`・`DaySpan`・`Span`・`Cat`・`Shift`・`Clock` と `Param` を使う）、補助変数の定義式は `Aux(式)` で包む。**変数が1つもない式（例: `cp.sum([]) >= 1`）は、CPMpy の式ではなく Python の定数 `False` になるが、`ModelKernel._named` が `BoolVal` に包むので、`Named.expr` は常に CPMpy の式になる**（MUS は式の `id()` で制約を対応づけるので、定数のままだと診断が `KeyError` で落ちる。tests/test_diagnose.py が検査）。`title` は短い制約クラス名（片側の群は方向を含む。例: `人数制約下限`）。全 soft 制約がメッセージを持つことは tests/test_named.py が検査する。
 2. パラメータは層ごとのデータクラス（`instance.py`）に足す。生成時に検証する（`__post_init__`）。
 3. `verify.py` に同名の検査関数を書き、`CHECKS` に登録する（式を使わず、元の規則から直接数える）。対応漏れは `tests/test_layers.py` が検出する。
 4. 前処理（窓・係数）が必要なら `preprocess.py` に純Pythonで書き、総当たりと照合するテストを `tests/` に足す。
